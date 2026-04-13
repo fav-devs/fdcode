@@ -1259,6 +1259,24 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
     }
   };
 
+  const disposeSessionContext = (
+    context: GeminiSessionContext,
+    detail: string,
+    options?: {
+      readonly removeFromSessions?: boolean;
+    },
+  ): void => {
+    context.stopped = true;
+    context.exitEmitted = true;
+    rejectPendingRequests(context, detail);
+    context.pendingApprovals.clear();
+    releaseProcessResources(context);
+    killChildProcess(context.child);
+    if (options?.removeFromSessions && sessions.get(context.session.threadId) === context) {
+      sessions.delete(context.session.threadId);
+    }
+  };
+
   const handleProcessExit = Effect.fn("handleProcessExit")(function* (
     context: GeminiSessionContext,
     input: {
@@ -2070,8 +2088,9 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
 
       const existing = sessions.get(input.threadId);
       if (existing) {
-        killChildProcess(existing.child);
-        sessions.delete(input.threadId);
+        disposeSessionContext(existing, "Session replaced while starting a new Gemini session.", {
+          removeFromSessions: true,
+        });
       }
 
       const geminiSettings = yield* getGeminiSettings(input.threadId);
@@ -2128,11 +2147,9 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
       yield* bootstrapSessionContext(context, bootstrapInput).pipe(
         Effect.tapError(() =>
           Effect.sync(() => {
-            context.stopped = true;
-            context.exitEmitted = true;
-            releaseProcessResources(context);
-            killChildProcess(context.child);
-            sessions.delete(input.threadId);
+            disposeSessionContext(context, "Gemini session failed during startup.", {
+              removeFromSessions: true,
+            });
           }),
         ),
       );
@@ -2456,20 +2473,12 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
       yield* bootstrapSessionContext(nextContext, rollbackBootstrapInput).pipe(
         Effect.tapError(() =>
           Effect.sync(() => {
-            nextContext.stopped = true;
-            nextContext.exitEmitted = true;
-            releaseProcessResources(nextContext);
-            killChildProcess(nextContext.child);
+            disposeSessionContext(nextContext, "Gemini rollback session failed during startup.");
           }),
         ),
       );
 
-      context.stopped = true;
-      context.exitEmitted = true;
-      rejectPendingRequests(context, "Session replaced during rollback.");
-      context.pendingApprovals.clear();
-      releaseProcessResources(context);
-      killChildProcess(context.child);
+      disposeSessionContext(context, "Session replaced during rollback.");
 
       sessions.set(threadId, nextContext);
       return snapshotThread(nextContext);
@@ -2482,8 +2491,15 @@ const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
       discard: true,
     }).pipe(Effect.asVoid);
 
-  yield* Effect.addFinalizer(() => stopAll().pipe(Effect.ignore));
-  yield* Effect.addFinalizer(() => Queue.shutdown(runtimeEventQueue));
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      for (const context of Array.from(sessions.values())) {
+        disposeSessionContext(context, "Gemini adapter is shutting down.", {
+          removeFromSessions: true,
+        });
+      }
+    }).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
+  );
 
   return {
     provider: PROVIDER,
