@@ -4,14 +4,19 @@ import {
   type ScopedThreadRef,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { isClaudeUltrathinkPrompt, resolveEffort } from "@t3tools/shared/model";
+import {
+  getGeminiThinkingSelectionValue,
+  isClaudeUltrathinkPrompt,
+  resolveEffort,
+} from "@t3tools/shared/model";
 import type { ReactNode } from "react";
 import type { DraftId } from "../../composerDraftStore";
 import { getProviderModelCapabilities } from "../../providerModels";
-import { TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
+import { shouldRenderTraitsControls, TraitsMenuContent, TraitsPicker } from "./TraitsPicker";
 import {
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeGeminiModelOptionsWithCapabilities,
 } from "@t3tools/shared/model";
 
 export type ComposerProviderStateInput = {
@@ -60,6 +65,22 @@ function hasComposerTraitsTarget(input: {
   return input.threadRef !== undefined || input.draftId !== undefined;
 }
 
+function shouldRenderComposerTraits(input: {
+  provider: ProviderKind;
+  model: string;
+  models: ReadonlyArray<ServerProviderModel>;
+  modelOptions: ProviderModelOptions[ProviderKind] | undefined;
+  prompt: string;
+}): boolean {
+  return shouldRenderTraitsControls({
+    provider: input.provider,
+    model: input.model,
+    models: input.models,
+    modelOptions: input.modelOptions,
+    prompt: input.prompt,
+  });
+}
+
 function getProviderStateFromCapabilities(
   input: ComposerProviderStateInput,
 ): ComposerProviderState {
@@ -69,11 +90,13 @@ function getProviderStateFromCapabilities(
 
   // Resolve effort
   const rawEffort = providerOptions
-    ? "effort" in providerOptions
-      ? providerOptions.effort
-      : "reasoningEffort" in providerOptions
-        ? providerOptions.reasoningEffort
-        : null
+    ? provider === "gemini"
+      ? getGeminiThinkingSelectionValue(caps, modelOptions?.gemini)
+      : "effort" in providerOptions
+        ? providerOptions.effort
+        : "reasoningEffort" in providerOptions
+          ? providerOptions.reasoningEffort
+          : null
     : null;
 
   const promptEffort = resolveEffort(caps, rawEffort) ?? null;
@@ -81,8 +104,10 @@ function getProviderStateFromCapabilities(
   // Normalize options for dispatch
   const normalizedOptions =
     provider === "codex"
-      ? normalizeCodexModelOptionsWithCapabilities(caps, providerOptions)
-      : normalizeClaudeModelOptionsWithCapabilities(caps, providerOptions);
+      ? normalizeCodexModelOptionsWithCapabilities(caps, modelOptions?.codex)
+      : provider === "claudeAgent"
+        ? normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions?.claudeAgent)
+        : normalizeGeminiModelOptionsWithCapabilities(caps, modelOptions?.gemini);
 
   // Ultrathink styling (driven by capabilities data, not provider identity)
   const ultrathinkActive =
@@ -112,7 +137,14 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       prompt,
       onPromptChange,
     }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "codex",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
         <TraitsMenuContent
           provider="codex"
           models={models}
@@ -133,7 +165,14 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       prompt,
       onPromptChange,
     }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "codex",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
         <TraitsPicker
           provider="codex"
           models={models}
@@ -157,7 +196,14 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       prompt,
       onPromptChange,
     }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "claudeAgent",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
         <TraitsMenuContent
           provider="claudeAgent"
           models={models}
@@ -178,9 +224,75 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
       prompt,
       onPromptChange,
     }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ? null : (
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "claudeAgent",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
         <TraitsPicker
           provider="claudeAgent"
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
+  },
+  gemini: {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: ({
+      threadRef,
+      draftId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "gemini",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
+        <TraitsMenuContent
+          provider="gemini"
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
+    renderTraitsPicker: ({
+      threadRef,
+      draftId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider: "gemini",
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
+        <TraitsPicker
+          provider="gemini"
           models={models}
           {...(threadRef ? { threadRef } : {})}
           {...(draftId ? { draftId } : {})}

@@ -91,7 +91,7 @@ function resetComposerDraftStore() {
 }
 
 function modelSelection(
-  provider: "codex" | "claudeAgent",
+  provider: "codex" | "claudeAgent" | "gemini",
   model: string,
   options?: ModelSelection["options"],
 ): ModelSelection {
@@ -955,6 +955,32 @@ describe("composerDraftStore modelSelection", () => {
       modelSelection("codex", "gpt-5.4", {
         reasoningEffort: "high",
         fastMode: false,
+      }),
+    );
+  });
+
+  it("stores Gemini thinking options on the current model selection", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setModelSelection(threadRef, modelSelection("gemini", "gemini-3.1-pro-preview"));
+
+    store.setProviderModelOptions(
+      threadRef,
+      "gemini",
+      {
+        thinkingLevel: "LOW",
+      },
+      { persistSticky: true },
+    );
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider.gemini).toEqual(
+      modelSelection("gemini", "gemini-3.1-pro-preview", {
+        thinkingLevel: "LOW",
+      }),
+    );
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.gemini).toEqual(
+      modelSelection("gemini", "gemini-3.1-pro-preview", {
+        thinkingLevel: "LOW",
       }),
     );
   });

@@ -121,3 +121,81 @@ export function normalizeCliError(
     cause: error,
   });
 }
+
+function stripMarkdownCodeFence(value: string): string {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i);
+  return fenced?.[1]?.trim() ?? trimmed;
+}
+
+function extractBalancedJsonSubstring(value: string): string | null {
+  const trimmed = value.trim();
+  const firstBrace = trimmed.indexOf("{");
+  const firstBracket = trimmed.indexOf("[");
+  const start =
+    firstBrace === -1
+      ? firstBracket
+      : firstBracket === -1
+        ? firstBrace
+        : Math.min(firstBrace, firstBracket);
+  if (start === -1) {
+    return null;
+  }
+
+  const stack: string[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{" || char === "[") {
+      stack.push(char);
+      continue;
+    }
+
+    if (char === "}" || char === "]") {
+      const expected = char === "}" ? "{" : "[";
+      if (stack.pop() !== expected) {
+        return null;
+      }
+      if (stack.length === 0) {
+        return trimmed.slice(start, index + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
+export function extractJsonValueFromText(value: string): unknown {
+  const normalized = stripMarkdownCodeFence(value);
+  try {
+    return JSON.parse(normalized);
+  } catch {
+    const jsonSubstring = extractBalancedJsonSubstring(normalized);
+    if (!jsonSubstring) {
+      throw new Error("No JSON object or array found in model response.");
+    }
+    return JSON.parse(jsonSubstring);
+  }
+}

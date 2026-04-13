@@ -7,6 +7,7 @@ import {
   DEFAULT_MODEL_BY_PROVIDER,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
+  GeminiModelOptions,
   type ServerProvider,
   ThreadId,
 } from "@t3tools/contracts";
@@ -35,6 +36,9 @@ const CLAUDE_THREAD_KEY = scopedThreadKey(CLAUDE_THREAD_REF);
 const CODEX_THREAD_ID = ThreadId.make("thread-codex-traits");
 const CODEX_THREAD_REF = scopeThreadRef(LOCAL_ENVIRONMENT_ID, CODEX_THREAD_ID);
 const CODEX_THREAD_KEY = scopedThreadKey(CODEX_THREAD_REF);
+const GEMINI_THREAD_ID = ThreadId.make("thread-gemini-traits");
+const GEMINI_THREAD_REF = scopeThreadRef(LOCAL_ENVIRONMENT_ID, GEMINI_THREAD_ID);
+const GEMINI_THREAD_KEY = scopedThreadKey(GEMINI_THREAD_REF);
 const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
   {
     provider: "codex",
@@ -118,6 +122,50 @@ const TEST_PROVIDERS: ReadonlyArray<ServerProvider> = [
           reasoningEffortLevels: [],
           supportsFastMode: false,
           supportsThinkingToggle: true,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+    ],
+  },
+  {
+    provider: "gemini",
+    enabled: true,
+    installed: true,
+    version: "0.1.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: "2026-01-01T00:00:00.000Z",
+    slashCommands: [],
+    skills: [],
+    models: [
+      {
+        slug: "gemini-3.1-pro-preview",
+        name: "Gemini 3.1 Pro Preview",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            { value: "HIGH", label: "High", isDefault: true },
+            { value: "LOW", label: "Low" },
+          ],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
+          contextWindowOptions: [],
+          promptInjectedEffortLevels: [],
+        },
+      },
+      {
+        slug: "gemini-2.5-flash",
+        name: "Gemini 2.5 Flash",
+        isCustom: false,
+        capabilities: {
+          reasoningEffortLevels: [
+            { value: "-1", label: "Dynamic", isDefault: true },
+            { value: "512", label: "512 Tokens" },
+            { value: "0", label: "Off" },
+          ],
+          supportsFastMode: false,
+          supportsThinkingToggle: false,
           contextWindowOptions: [],
           promptInjectedEffortLevels: [],
         },
@@ -498,6 +546,133 @@ describe("TraitsPicker (Codex)", () => {
     expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.codex).toMatchObject({
       provider: "codex",
       options: { fastMode: true },
+    });
+  });
+});
+
+// ── Gemini TraitsPicker tests ────────────────────────────────────────
+
+function GeminiTraitsPickerHarness(props: {
+  model: string;
+  fallbackModelSelection: ModelSelection | null;
+}) {
+  const prompt = useComposerThreadDraft(GEMINI_THREAD_REF).prompt;
+  const setPrompt = useComposerDraftStore((store) => store.setPrompt);
+  const { modelOptions, selectedModel } = useEffectiveComposerModelState({
+    threadRef: GEMINI_THREAD_REF,
+    providers: TEST_PROVIDERS,
+    selectedProvider: "gemini",
+    threadModelSelection: props.fallbackModelSelection,
+    projectModelSelection: null,
+    settings: {
+      ...DEFAULT_SERVER_SETTINGS,
+      ...DEFAULT_CLIENT_SETTINGS,
+    },
+  });
+  const handlePromptChange = useCallback(
+    (nextPrompt: string) => {
+      setPrompt(GEMINI_THREAD_REF, nextPrompt);
+    },
+    [setPrompt],
+  );
+
+  return (
+    <TraitsPicker
+      provider="gemini"
+      models={TEST_PROVIDERS[2]!.models}
+      threadRef={GEMINI_THREAD_REF}
+      model={selectedModel ?? props.model}
+      prompt={prompt}
+      modelOptions={modelOptions?.gemini}
+      onPromptChange={handlePromptChange}
+    />
+  );
+}
+
+async function mountGeminiPicker(props?: { model?: string; options?: GeminiModelOptions }) {
+  const model = props?.model ?? "gemini-3.1-pro-preview";
+  const draftsByThreadKey: Record<string, ComposerThreadDraftState> = {
+    [GEMINI_THREAD_KEY]: {
+      prompt: "",
+      images: [],
+      nonPersistedImageIds: [],
+      persistedAttachments: [],
+      terminalContexts: [],
+      modelSelectionByProvider: {
+        gemini: {
+          provider: "gemini",
+          model,
+          ...(props?.options ? { options: props.options } : {}),
+        },
+      },
+      activeProvider: "gemini",
+      runtimeMode: null,
+      interactionMode: null,
+    },
+  };
+
+  useComposerDraftStore.setState({
+    draftsByThreadKey,
+    draftThreadsByThreadKey: {},
+    logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+  });
+  const host = document.createElement("div");
+  document.body.append(host);
+  const fallbackModelSelection =
+    props?.options !== undefined
+      ? ({
+          provider: "gemini",
+          model,
+          options: props.options,
+        } satisfies ModelSelection)
+      : null;
+  const screen = await render(
+    <GeminiTraitsPickerHarness model={model} fallbackModelSelection={fallbackModelSelection} />,
+    { container: host },
+  );
+
+  const cleanup = async () => {
+    await screen.unmount();
+    host.remove();
+  };
+
+  return {
+    [Symbol.asyncDispose]: cleanup,
+    cleanup,
+  };
+}
+
+describe("TraitsPicker (Gemini)", () => {
+  afterEach(() => {
+    document.body.innerHTML = "";
+    localStorage.removeItem(COMPOSER_DRAFT_STORAGE_KEY);
+    useComposerDraftStore.setState({
+      draftsByThreadKey: {},
+      draftThreadsByThreadKey: {},
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {},
+      stickyModelSelectionByProvider: {},
+    });
+  });
+
+  it("updates Gemini thinking selections in the picker and sticky state", async () => {
+    await using _ = await mountGeminiPicker({
+      options: { thinkingLevel: "HIGH" },
+    });
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("High");
+    });
+
+    await page.getByRole("button").click();
+    await page.getByRole("menuitemradio", { name: "Low" }).click();
+
+    await vi.waitFor(() => {
+      expect(document.body.textContent ?? "").toContain("Low");
+    });
+
+    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider.gemini).toMatchObject({
+      provider: "gemini",
+      options: { thinkingLevel: "LOW" },
     });
   });
 });

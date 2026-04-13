@@ -111,7 +111,7 @@ import {
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
-import { resolveAppModelSelection } from "../modelSelection";
+import { buildModelSelection, resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
@@ -2530,7 +2530,7 @@ export default function ChatView(props: ChatViewProps) {
         }
       }
       const title = truncate(titleSeed);
-      const threadCreateModelSelection: ModelSelection = {
+      const threadCreateModelSelection = buildModelSelection({
         provider: ctxSelectedProvider,
         model:
           ctxSelectedModel ||
@@ -2539,7 +2539,7 @@ export default function ChatView(props: ChatViewProps) {
         ...(ctxSelectedModelSelection.options
           ? { options: ctxSelectedModelSelection.options }
           : {}),
-      };
+      });
 
       // Auto-title from first message
       if (isFirstMessage && isServerThread) {
@@ -3110,10 +3110,10 @@ export default function ChatView(props: ChatViewProps) {
         providerStatuses,
         model,
       );
-      const nextModelSelection: ModelSelection = {
+      const nextModelSelection = buildModelSelection({
         provider: resolvedProvider,
         model: resolvedModel,
-      };
+      });
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,

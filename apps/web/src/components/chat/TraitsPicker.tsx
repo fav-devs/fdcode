@@ -1,6 +1,7 @@
 import {
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type GeminiModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
   type ScopedThreadRef,
@@ -8,6 +9,8 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
+  geminiModelOptionsFromEffortValue,
+  getGeminiThinkingSelectionValue,
   isClaudeUltrathinkPrompt,
   trimOrNull,
   getDefaultEffort,
@@ -48,10 +51,14 @@ const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 function getRawEffort(
   provider: ProviderKind,
+  caps: ReturnType<typeof getProviderModelCapabilities>,
   modelOptions: ProviderOptions | null | undefined,
 ): string | null {
   if (provider === "codex") {
     return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
+  }
+  if (provider === "gemini") {
+    return getGeminiThinkingSelectionValue(caps, modelOptions as GeminiModelOptions | undefined);
   }
   return trimOrNull((modelOptions as ClaudeModelOptions | undefined)?.effort);
 }
@@ -74,6 +81,9 @@ function buildNextOptions(
   if (provider === "codex") {
     return { ...(modelOptions as CodexModelOptions | undefined), ...patch } as CodexModelOptions;
   }
+  if (provider === "gemini") {
+    return { ...(modelOptions as GeminiModelOptions | undefined), ...patch } as GeminiModelOptions;
+  }
   return { ...(modelOptions as ClaudeModelOptions | undefined), ...patch } as ClaudeModelOptions;
 }
 
@@ -93,7 +103,7 @@ function getSelectedTraits(
       );
 
   // Resolve effort from options (provider-specific key)
-  const rawEffort = getRawEffort(provider, modelOptions);
+  const rawEffort = getRawEffort(provider, caps, modelOptions);
   const effort = resolveEffort(caps, rawEffort) ?? null;
 
   // Thinking toggle (only for models that support it)
@@ -137,6 +147,34 @@ function getSelectedTraits(
     ultrathinkPromptControlled,
     ultrathinkInBodyText,
   };
+}
+
+function hasVisibleTraitsControls(selectedTraits: ReturnType<typeof getSelectedTraits>): boolean {
+  return (
+    selectedTraits.effort !== null ||
+    selectedTraits.thinkingEnabled !== null ||
+    selectedTraits.contextWindowOptions.length > 1
+  );
+}
+
+export function shouldRenderTraitsControls(input: {
+  provider: ProviderKind;
+  models: ReadonlyArray<ServerProviderModel>;
+  model: string | null | undefined;
+  prompt: string;
+  modelOptions: ProviderOptions | null | undefined;
+  allowPromptInjectedEffort?: boolean;
+}): boolean {
+  return hasVisibleTraitsControls(
+    getSelectedTraits(
+      input.provider,
+      input.models,
+      input.model,
+      input.prompt,
+      input.modelOptions,
+      input.allowPromptInjectedEffort ?? true,
+    ),
+  );
 }
 
 export interface TraitsMenuContentProps {
@@ -210,6 +248,14 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
         onPromptChange(stripped);
       }
+      if (provider === "gemini") {
+        const nextGeminiOptions = geminiModelOptionsFromEffortValue(nextOption.value);
+        if (!nextGeminiOptions) {
+          return;
+        }
+        updateModelOptions(nextGeminiOptions);
+        return;
+      }
       const effortKey = provider === "codex" ? "reasoningEffort" : "effort";
       updateModelOptions(
         buildNextOptions(provider, modelOptions, { [effortKey]: nextOption.value }),
@@ -228,7 +274,20 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     ],
   );
 
-  if (effort === null && thinkingEnabled === null && contextWindowOptions.length <= 1) {
+  if (
+    !hasVisibleTraitsControls({
+      caps,
+      effort,
+      effortLevels,
+      thinkingEnabled,
+      fastModeEnabled,
+      contextWindowOptions,
+      contextWindow,
+      defaultContextWindow,
+      ultrathinkPromptControlled,
+      ultrathinkInBodyText,
+    })
+  ) {
     return null;
   }
 
@@ -237,7 +296,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       {effort ? (
         <>
           <MenuGroup>
-            <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">Effort</div>
+            <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
+              {provider === "gemini" ? "Thinking" : "Effort"}
+            </div>
             {ultrathinkInBodyText ? (
               <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">
                 Your prompt contains &quot;ultrathink&quot; in the text. Remove it to change effort.
@@ -350,6 +411,23 @@ export const TraitsPicker = memo(function TraitsPicker({
     defaultContextWindow,
     ultrathinkPromptControlled,
   } = getSelectedTraits(provider, models, model, prompt, modelOptions, allowPromptInjectedEffort);
+
+  if (
+    !hasVisibleTraitsControls({
+      caps,
+      effort,
+      effortLevels,
+      thinkingEnabled,
+      fastModeEnabled,
+      contextWindowOptions,
+      contextWindow,
+      defaultContextWindow,
+      ultrathinkPromptControlled,
+      ultrathinkInBodyText: false,
+    })
+  ) {
+    return null;
+  }
 
   const effortLabel = effort
     ? (effortLevels.find((l) => l.value === effort)?.label ?? effort)

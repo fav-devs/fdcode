@@ -5,15 +5,21 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from "@t3tools/contracts";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import {
+  EMPTY_MODEL_CAPABILITIES,
+  geminiCapabilitiesForModel,
+  normalizeModelSlug,
+} from "@t3tools/shared/model";
 
-const EMPTY_CAPABILITIES: ModelCapabilities = {
-  reasoningEffortLevels: [],
-  supportsFastMode: false,
-  supportsThinkingToggle: false,
-  contextWindowOptions: [],
-  promptInjectedEffortLevels: [],
-};
+function hasDeclaredCapabilities(capabilities: ModelCapabilities): boolean {
+  return (
+    capabilities.reasoningEffortLevels.length > 0 ||
+    capabilities.supportsFastMode ||
+    capabilities.supportsThinkingToggle ||
+    capabilities.contextWindowOptions.length > 0 ||
+    capabilities.promptInjectedEffortLevels.length > 0
+  );
+}
 
 export function getProviderModels(
   providers: ReadonlyArray<ServerProvider>,
@@ -53,7 +59,18 @@ export function getProviderModelCapabilities(
   provider: ProviderKind,
 ): ModelCapabilities {
   const slug = normalizeModelSlug(model, provider);
-  return models.find((candidate) => candidate.slug === slug)?.capabilities ?? EMPTY_CAPABILITIES;
+  if (!slug) {
+    return EMPTY_MODEL_CAPABILITIES;
+  }
+
+  const capabilities = models.find((candidate) => candidate.slug === slug)?.capabilities;
+  if (provider === "gemini") {
+    return capabilities && hasDeclaredCapabilities(capabilities)
+      ? capabilities
+      : geminiCapabilitiesForModel(slug, capabilities ?? EMPTY_MODEL_CAPABILITIES);
+  }
+
+  return capabilities ?? EMPTY_MODEL_CAPABILITIES;
 }
 
 export function getDefaultServerModel(

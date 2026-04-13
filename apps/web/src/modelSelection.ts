@@ -1,7 +1,11 @@
 import {
+  type ClaudeModelOptions,
+  type CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
+  type GeminiModelOptions,
   type ModelSelection,
   type ProviderKind,
+  type ProviderModelOptions,
   type ServerProvider,
 } from "@t3tools/contracts";
 import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
@@ -45,9 +49,43 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  gemini: {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model ids for the picker and `/model` command.",
+    placeholder: "your-gemini-model-id",
+    example: "gemini-model-id-from-cli",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
+
+export function buildModelSelection(input: {
+  provider: ProviderKind;
+  model: string;
+  options?: ProviderModelOptions[ProviderKind];
+}): ModelSelection {
+  switch (input.provider) {
+    case "codex":
+      return {
+        provider: "codex",
+        model: input.model,
+        ...(input.options ? { options: input.options as CodexModelOptions } : {}),
+      };
+    case "claudeAgent":
+      return {
+        provider: "claudeAgent",
+        model: input.model,
+        ...(input.options ? { options: input.options as ClaudeModelOptions } : {}),
+      };
+    case "gemini":
+      return {
+        provider: "gemini",
+        model: input.model,
+        ...(input.options ? { options: input.options as GeminiModelOptions } : {}),
+      };
+  }
+}
 
 export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
@@ -165,6 +203,12 @@ export function getCustomModelOptionsByProvider(
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
     ),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedProvider === "gemini" ? selectedModel : undefined,
+    ),
   };
 }
 
@@ -192,9 +236,9 @@ export function resolveAppModelSelectionState(
     },
   });
 
-  return {
+  return buildModelSelection({
     provider,
     model,
     ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  };
+  });
 }

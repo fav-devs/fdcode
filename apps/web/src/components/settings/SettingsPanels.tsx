@@ -43,6 +43,7 @@ import {
 } from "../../lib/desktopUpdateReactQuery";
 import {
   MAX_CUSTOM_MODEL_LENGTH,
+  buildModelSelection,
   getCustomModelOptionsByProvider,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
@@ -124,6 +125,12 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     title: "Claude",
     binaryPlaceholder: "Claude binary path",
     binaryDescription: "Path to the Claude binary",
+  },
+  {
+    provider: "gemini",
+    title: "Gemini",
+    binaryPlaceholder: "Gemini binary path",
+    binaryDescription: "Path to the Gemini binary",
   },
 ] as const;
 
@@ -514,12 +521,18 @@ export function GeneralSettingsPanel() {
       settings.providers.claudeAgent.customModels.length > 0 ||
       settings.providers.claudeAgent.launchArgs !== "",
     ),
+    gemini: Boolean(
+      settings.providers.gemini.binaryPath !==
+        DEFAULT_UNIFIED_SETTINGS.providers.gemini.binaryPath ||
+      settings.providers.gemini.customModels.length > 0,
+    ),
   });
   const [customModelInputByProvider, setCustomModelInputByProvider] = useState<
     Record<ProviderKind, string>
   >({
     codex: "",
     claudeAgent: "",
+    gemini: "",
   });
   const [customModelErrorByProvider, setCustomModelErrorByProvider] = useState<
     Partial<Record<ProviderKind, string | null>>
@@ -1035,7 +1048,7 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: { provider, model },
+                        textGenerationModelSelection: buildModelSelection({ provider, model }),
                       },
                       serverProviders,
                     ),
@@ -1060,11 +1073,11 @@ export function GeneralSettingsPanel() {
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
                         ...settings,
-                        textGenerationModelSelection: {
+                        textGenerationModelSelection: buildModelSelection({
                           provider: textGenProvider,
                           model: textGenModel,
                           ...(nextOptions ? { options: nextOptions } : {}),
-                        },
+                        }),
                       },
                       serverProviders,
                     ),

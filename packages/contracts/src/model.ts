@@ -13,6 +13,10 @@ export const ClaudeAgentEffort = Schema.Literals([
   "ultrathink",
 ]);
 export type ClaudeAgentEffort = typeof ClaudeAgentEffort.Type;
+export const GEMINI_THINKING_LEVEL_OPTIONS = ["LOW", "HIGH"] as const;
+export type GeminiThinkingLevel = (typeof GEMINI_THINKING_LEVEL_OPTIONS)[number];
+export const GEMINI_THINKING_BUDGET_OPTIONS = [-1, 512, 0] as const;
+export type GeminiThinkingBudget = (typeof GEMINI_THINKING_BUDGET_OPTIONS)[number];
 export type ProviderReasoningEffort = CodexReasoningEffort | ClaudeAgentEffort;
 
 export const CodexModelOptions = Schema.Struct({
@@ -29,9 +33,16 @@ export const ClaudeModelOptions = Schema.Struct({
 });
 export type ClaudeModelOptions = typeof ClaudeModelOptions.Type;
 
+export const GeminiModelOptions = Schema.Struct({
+  thinkingLevel: Schema.optional(Schema.Literals(GEMINI_THINKING_LEVEL_OPTIONS)),
+  thinkingBudget: Schema.optional(Schema.Literals(GEMINI_THINKING_BUDGET_OPTIONS)),
+});
+export type GeminiModelOptions = typeof GeminiModelOptions.Type;
+
 export const ProviderModelOptions = Schema.Struct({
   codex: Schema.optional(CodexModelOptions),
   claudeAgent: Schema.optional(ClaudeModelOptions),
+  gemini: Schema.optional(GeminiModelOptions),
 });
 export type ProviderModelOptions = typeof ProviderModelOptions.Type;
 
@@ -61,6 +72,7 @@ export type ModelCapabilities = typeof ModelCapabilities.Type;
 export const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4",
   claudeAgent: "claude-sonnet-4-6",
+  gemini: "auto-gemini-3",
 };
 
 export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
@@ -69,6 +81,7 @@ export const DEFAULT_MODEL = DEFAULT_MODEL_BY_PROVIDER.codex;
 export const DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER: Record<ProviderKind, string> = {
   codex: "gpt-5.4-mini",
   claudeAgent: "claude-haiku-4-5",
+  gemini: "gemini-2.5-flash",
 };
 
 export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string, string>> = {
@@ -96,6 +109,18 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
     "claude-haiku-4.5": "claude-haiku-4-5",
     "claude-haiku-4-5-20251001": "claude-haiku-4-5",
   },
+  gemini: {
+    auto: "auto-gemini-3",
+    "auto-gemini-3": "auto-gemini-3",
+    "auto-gemini-2.5": "auto-gemini-2.5",
+    "gemini-3-pro-preview": "gemini-3.1-pro-preview",
+    "gemini-3.1-pro-preview": "gemini-3.1-pro-preview",
+    "gemini-3-flash-preview": "gemini-3-flash-preview",
+    "gemini-3.1-flash-lite-preview": "gemini-3.1-flash-lite-preview",
+    "gemini-2.5-pro": "gemini-2.5-pro",
+    "gemini-2.5-flash": "gemini-2.5-flash",
+    "gemini-2.5-flash-lite": "gemini-2.5-flash-lite",
+  },
 };
 
 // ── Provider display names ────────────────────────────────────────────
@@ -103,4 +128,5 @@ export const MODEL_SLUG_ALIASES_BY_PROVIDER: Record<ProviderKind, Record<string,
 export const PROVIDER_DISPLAY_NAMES: Record<ProviderKind, string> = {
   codex: "Codex",
   claudeAgent: "Claude",
+  gemini: "Gemini",
 };
