@@ -161,6 +161,7 @@ export const probeGeminiCapabilities = (input: {
         });
 
         if (!child.stdin || !child.stdout || !child.stderr) {
+          child.kill();
           resolve({
             status: "warning",
             auth: { status: "unknown" },
