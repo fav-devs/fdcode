@@ -125,184 +125,72 @@ function getProviderStateFromCapabilities(
   };
 }
 
+function makeProviderRegistryEntry(provider: ProviderKind): ProviderRegistryEntry {
+  return {
+    getState: (input) => getProviderStateFromCapabilities(input),
+    renderTraitsMenuContent: ({
+      threadRef,
+      draftId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider,
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
+        <TraitsMenuContent
+          provider={provider}
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
+    renderTraitsPicker: ({
+      threadRef,
+      draftId,
+      model,
+      models,
+      modelOptions,
+      prompt,
+      onPromptChange,
+    }) =>
+      !hasComposerTraitsTarget({ threadRef, draftId }) ||
+      !shouldRenderComposerTraits({
+        provider,
+        model,
+        models,
+        modelOptions,
+        prompt,
+      }) ? null : (
+        <TraitsPicker
+          provider={provider}
+          models={models}
+          {...(threadRef ? { threadRef } : {})}
+          {...(draftId ? { draftId } : {})}
+          model={model}
+          modelOptions={modelOptions}
+          prompt={prompt}
+          onPromptChange={onPromptChange}
+        />
+      ),
+  };
+}
+
 const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
-  codex: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "codex",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsMenuContent
-          provider="codex"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-    renderTraitsPicker: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "codex",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsPicker
-          provider="codex"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-  },
-  claudeAgent: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "claudeAgent",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsMenuContent
-          provider="claudeAgent"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-    renderTraitsPicker: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "claudeAgent",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsPicker
-          provider="claudeAgent"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-  },
-  gemini: {
-    getState: (input) => getProviderStateFromCapabilities(input),
-    renderTraitsMenuContent: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "gemini",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsMenuContent
-          provider="gemini"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-    renderTraitsPicker: ({
-      threadRef,
-      draftId,
-      model,
-      models,
-      modelOptions,
-      prompt,
-      onPromptChange,
-    }) =>
-      !hasComposerTraitsTarget({ threadRef, draftId }) ||
-      !shouldRenderComposerTraits({
-        provider: "gemini",
-        model,
-        models,
-        modelOptions,
-        prompt,
-      }) ? null : (
-        <TraitsPicker
-          provider="gemini"
-          models={models}
-          {...(threadRef ? { threadRef } : {})}
-          {...(draftId ? { draftId } : {})}
-          model={model}
-          modelOptions={modelOptions}
-          prompt={prompt}
-          onPromptChange={onPromptChange}
-        />
-      ),
-  },
+  codex: makeProviderRegistryEntry("codex"),
+  claudeAgent: makeProviderRegistryEntry("claudeAgent"),
+  gemini: makeProviderRegistryEntry("gemini"),
 };
 
 export function getComposerProviderState(input: ComposerProviderStateInput): ComposerProviderState {
