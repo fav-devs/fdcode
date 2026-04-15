@@ -2212,6 +2212,9 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
           }
           set((state) => {
             const existing = state.draftsByThreadKey[threadKey] ?? createEmptyThreadDraft();
+            if (existing.prompt === prompt) {
+              return state;
+            }
             const nextDraft: ComposerThreadDraftState = {
               ...existing,
               prompt,
