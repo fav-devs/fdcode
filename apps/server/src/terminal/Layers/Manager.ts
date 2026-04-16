@@ -1692,12 +1692,19 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const targetCols = input.cols ?? liveSession.cols;
           const targetRows = input.rows ?? liveSession.rows;
           const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
-          const hasLiveProcess = liveSession.process !== null && liveSession.status === "running";
+          const nextWorktreePath =
+            input.worktreePath !== undefined
+              ? (input.worktreePath ?? null)
+              : liveSession.worktreePath;
+          const launchContextChanged =
+            liveSession.cwd !== input.cwd ||
+            runtimeEnvChanged ||
+            liveSession.worktreePath !== nextWorktreePath;
 
-          if (!hasLiveProcess && (liveSession.cwd !== input.cwd || runtimeEnvChanged)) {
+          if (launchContextChanged) {
             yield* stopProcess(liveSession);
             liveSession.cwd = input.cwd;
-            liveSession.worktreePath = input.worktreePath ?? null;
+            liveSession.worktreePath = nextWorktreePath;
             liveSession.runtimeEnv = nextRuntimeEnv;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
@@ -1711,7 +1718,7 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
             );
           } else if (liveSession.status === "exited" || liveSession.status === "error") {
             liveSession.runtimeEnv = nextRuntimeEnv;
-            liveSession.worktreePath = input.worktreePath ?? null;
+            liveSession.worktreePath = nextWorktreePath;
             liveSession.history = "";
             liveSession.pendingHistoryControlSequence = "";
             liveSession.pendingProcessEvents = [];
