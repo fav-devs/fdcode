@@ -31,12 +31,14 @@ import {
   nextTerminalId,
   resolveProjectScriptTerminalId,
 } from "./terminalMenu";
+import { resolvePreferredThreadWorktreePath } from "./terminalLaunchContext";
 import { ThreadDetailScreen } from "./ThreadDetailScreen";
 import { ThreadGitControls } from "./ThreadGitControls";
 import { ThreadNavigationDrawer } from "./ThreadNavigationDrawer";
 import { useSelectedThreadCommands } from "./use-selected-thread-commands";
 import { useSelectedThreadGitActions } from "./use-selected-thread-git-actions";
 import { useSelectedThreadGitState } from "./use-selected-thread-git-state";
+import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
 import { useThreadComposerState } from "./use-thread-composer-state";
 
 function firstRouteParam(value: string | string[] | undefined): string | null {
@@ -56,6 +58,7 @@ export function ThreadRouteScreen() {
   const { selectedThread, selectedThreadProject, selectedEnvironmentConnection } =
     useThreadSelection();
   const selectedThreadDetail = useSelectedThreadDetail();
+  const { selectedThreadCwd } = useSelectedThreadWorktree();
   const composer = useThreadComposerState();
   const gitState = useSelectedThreadGitState();
   const gitActions = useSelectedThreadGitActions();
@@ -89,7 +92,7 @@ export function ThreadRouteScreen() {
   /* ─── Git status for native header trigger ───────────────────────── */
   const gitStatus = useGitStatus({
     environmentId: selectedThread?.environmentId ?? "",
-    cwd: selectedThread?.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
+    cwd: selectedThreadCwd,
   });
   const knownTerminalSessions = useKnownTerminalSessions({
     environmentId: selectedThread?.environmentId ?? null,
@@ -103,18 +106,15 @@ export function ThreadRouteScreen() {
       }),
     [knownTerminalSessions, selectedThreadProject?.workspaceRoot],
   );
+  const selectedThreadDetailWorktreePath = selectedThreadDetail?.worktreePath ?? null;
 
   /* ─── Git action progress (for overlay banner) ──────────────────── */
   const gitActionProgressTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
-      cwd: selectedThread?.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
+      cwd: selectedThreadCwd,
     }),
-    [
-      selectedThread?.environmentId,
-      selectedThread?.worktreePath,
-      selectedThreadProject?.workspaceRoot,
-    ],
+    [selectedThread?.environmentId, selectedThreadCwd],
   );
   const gitActionProgress = useGitActionProgress(gitActionProgressTarget);
 
@@ -122,9 +122,9 @@ export function ThreadRouteScreen() {
     if (!selectedThread) return;
     await gitStatusManager.refresh({
       environmentId: selectedThread.environmentId,
-      cwd: selectedThread.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
+      cwd: selectedThreadCwd,
     });
-  }, [selectedThread, selectedThreadProject?.workspaceRoot]);
+  }, [selectedThread, selectedThreadCwd]);
 
   /** Wraps thread refresh + git status refresh for pull-to-refresh */
   const handleRefreshAll = useCallback(async () => {
@@ -177,19 +177,23 @@ export function ThreadRouteScreen() {
           (session) => session.status === "running" || session.status === "starting",
         ),
       });
+      const preferredWorktreePath = resolvePreferredThreadWorktreePath({
+        threadShellWorktreePath: selectedThread.worktreePath ?? null,
+        threadDetailWorktreePath: selectedThreadDetailWorktreePath,
+      });
       const cwd = projectScriptCwd({
         project: { cwd: selectedThreadProject.workspaceRoot },
-        worktreePath: selectedThread.worktreePath ?? null,
+        worktreePath: preferredWorktreePath,
       });
       const env = projectScriptRuntimeEnv({
         project: { cwd: selectedThreadProject.workspaceRoot },
-        worktreePath: selectedThread.worktreePath ?? null,
+        worktreePath: preferredWorktreePath,
       });
       const snapshot = await client.terminal.open({
         threadId: selectedThread.id,
         terminalId: targetTerminalId,
         cwd,
-        worktreePath: selectedThread.worktreePath ?? null,
+        worktreePath: preferredWorktreePath,
         env,
       });
 
@@ -204,7 +208,13 @@ export function ThreadRouteScreen() {
       });
       void router.push(buildThreadTerminalRoutePath(selectedThread, targetTerminalId));
     },
-    [router, selectedThread, selectedThreadProject, terminalMenuSessions],
+    [
+      router,
+      selectedThread,
+      selectedThreadDetailWorktreePath,
+      selectedThreadProject,
+      terminalMenuSessions,
+    ],
   );
 
   if (!environmentId || !threadId) {

@@ -19,9 +19,11 @@ import {
   useTerminalSessionTarget,
 } from "../../state/use-terminal-session";
 import { useThreadSelection } from "../../state/use-thread-selection";
+import { useSelectedThreadDetail } from "../../state/use-thread-detail";
 import { TerminalSurface } from "../../native/terminal/NativeTerminalSurface";
 import { loadPreferences, savePreferencesPatch } from "../../lib/storage";
 import { resolveTerminalRouteBootstrap } from "./terminalRouteBootstrap";
+import { resolveTerminalOpenLocation } from "./terminalLaunchContext";
 import {
   basename,
   buildTerminalMenuSessions,
@@ -163,6 +165,7 @@ export function ThreadTerminalRouteScreen() {
   }>();
   const { selectedThread, selectedThreadProject, selectedEnvironmentConnection } =
     useThreadSelection();
+  const selectedThreadDetail = useSelectedThreadDetail();
   const requestedTerminalId = firstRouteParam(params.terminalId);
   const knownSessions = useKnownTerminalSessions({
     environmentId: selectedThread?.environmentId ?? null,
@@ -298,21 +301,19 @@ export function ThreadTerminalRouteScreen() {
       return;
     }
 
-    const targetCwd =
-      terminal.snapshot?.cwd ??
-      activeKnownSession?.state.snapshot?.cwd ??
-      selectedThread.worktreePath ??
-      selectedThreadProject.workspaceRoot;
-    const targetWorktreePath =
-      terminal.snapshot?.worktreePath ??
-      activeKnownSession?.state.snapshot?.worktreePath ??
-      selectedThread.worktreePath;
+    const launchLocation = resolveTerminalOpenLocation({
+      terminalSnapshot: terminal.snapshot,
+      activeSessionSnapshot: activeKnownSession?.state.snapshot ?? null,
+      workspaceRoot: selectedThreadProject.workspaceRoot,
+      threadShellWorktreePath: selectedThread.worktreePath ?? null,
+      threadDetailWorktreePath: selectedThreadDetail?.worktreePath ?? null,
+    });
 
     const snapshot = await client.terminal.open({
       threadId: selectedThread.id,
       terminalId,
-      cwd: targetCwd,
-      worktreePath: targetWorktreePath,
+      cwd: launchLocation.cwd,
+      worktreePath: launchLocation.worktreePath,
       cols: lastGridSize.cols,
       rows: lastGridSize.rows,
     });
@@ -321,12 +322,11 @@ export function ThreadTerminalRouteScreen() {
   }, [
     lastGridSize.cols,
     lastGridSize.rows,
-    activeKnownSession?.state.snapshot?.cwd,
-    activeKnownSession?.state.snapshot?.worktreePath,
+    activeKnownSession?.state.snapshot,
+    selectedThreadDetail?.worktreePath,
     selectedThread,
     selectedThreadProject?.workspaceRoot,
-    terminal.snapshot?.cwd,
-    terminal.snapshot?.worktreePath,
+    terminal.snapshot,
     terminalId,
   ]);
 

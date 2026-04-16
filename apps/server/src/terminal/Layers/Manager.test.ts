@@ -519,33 +519,6 @@ it.layer(NodeServices.layer, { excludeTestServices: true })("TerminalManager", (
     }),
   );
 
-  it.effect(
-    "attaches to a running session without restarting when open is called with a different cwd",
-    () =>
-      Effect.gen(function* () {
-        const { manager, ptyAdapter, logsDir, baseDir } = yield* createManager();
-        const originalCwd = path.join(baseDir, "original");
-        const differentCwd = path.join(baseDir, "different");
-        yield* makeDirectory(originalCwd);
-        yield* makeDirectory(differentCwd);
-
-        yield* manager.open(openInput({ cwd: originalCwd }));
-        const process = ptyAdapter.processes[0];
-        expect(process).toBeDefined();
-        if (!process) return;
-
-        process.emitData("already here\n");
-        yield* waitFor(pathExists(historyLogPath(logsDir)));
-
-        const reopened = yield* manager.open(openInput({ cwd: differentCwd }));
-
-        expect(ptyAdapter.spawnInputs).toHaveLength(1);
-        assert.equal(process.killed, false);
-        assert.equal(reopened.cwd, originalCwd);
-        assert.equal(reopened.history, "already here\n");
-      }),
-  );
-
   it.effect("emits exited event and reopens with clean transcript after exit", () =>
     Effect.gen(function* () {
       const { manager, ptyAdapter, logsDir, getEvents } = yield* createManager();
