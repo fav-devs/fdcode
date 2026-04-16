@@ -8,6 +8,7 @@ const VARIANT_CONFIG: Record<
   AppVariant,
   {
     readonly appName: string;
+    readonly scheme: string;
     readonly iosIcon: string;
     readonly iosBundleIdentifier: string;
     readonly androidPackage: string;
@@ -15,18 +16,21 @@ const VARIANT_CONFIG: Record<
 > = {
   development: {
     appName: "fdcode Dev",
+    scheme: "fdcode-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
     iosBundleIdentifier: "com.favdevs.fdcode.dev",
     androidPackage: "com.favdevs.fdcode.dev",
   },
   preview: {
     appName: "fdcode Preview",
+    scheme: "fdcode-preview",
     iosIcon: "./assets/icon-composer-prod.icon",
     iosBundleIdentifier: "com.favdevs.fdcode.preview",
     androidPackage: "com.favdevs.fdcode.preview",
   },
   production: {
     appName: "fdcode",
+    scheme: "fdcode",
     iosIcon: "./assets/icon-composer-prod.icon",
     iosBundleIdentifier: "com.favdevs.fdcode",
     androidPackage: "com.favdevs.fdcode",
@@ -49,7 +53,7 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "fdcode",
-  scheme: "fdcode",
+  scheme: variant.scheme,
   version: "0.1.0",
   runtimeVersion: {
     policy: "appVersion",
