@@ -17,6 +17,17 @@ export interface TerminalSessionTarget {
   readonly terminalId: string | null;
 }
 
+export interface KnownTerminalSessionTarget {
+  readonly environmentId: string;
+  readonly threadId: string;
+  readonly terminalId: string;
+}
+
+export interface KnownTerminalSession {
+  readonly target: KnownTerminalSessionTarget;
+  readonly state: TerminalSessionState;
+}
+
 export interface TerminalSessionManagerConfig {
   readonly getRegistry: () => AtomRegistry.AtomRegistry;
   readonly maxBufferBytes?: number;
@@ -48,12 +59,36 @@ export const EMPTY_TERMINAL_SESSION_ATOM = Atom.make(EMPTY_TERMINAL_SESSION_STAT
   Atom.withLabel("terminal-session:null"),
 );
 
+export const knownTerminalSessionsAtom = Atom.make<Record<string, KnownTerminalSessionTarget>>(
+  {},
+).pipe(Atom.keepAlive, Atom.withLabel("terminal-session:index"));
+
 export function getTerminalSessionTargetKey(target: TerminalSessionTarget): string | null {
   if (target.environmentId === null || target.threadId === null || target.terminalId === null) {
     return null;
   }
 
   return `${target.environmentId}:${target.threadId}:${target.terminalId}`;
+}
+
+function toKnownTarget(target: TerminalSessionTarget): KnownTerminalSessionTarget | null {
+  const targetKey = getTerminalSessionTargetKey(target);
+  if (targetKey === null) {
+    return null;
+  }
+
+  const environmentId = target.environmentId;
+  const threadId = target.threadId;
+  const terminalId = target.terminalId;
+  if (environmentId === null || threadId === null || terminalId === null) {
+    return null;
+  }
+
+  return {
+    environmentId,
+    threadId,
+    terminalId,
+  };
 }
 
 function trimBufferToBytes(buffer: string, maxBufferBytes: number): string {
@@ -82,8 +117,44 @@ function stateFromSnapshot(
 export function createTerminalSessionManager(config: TerminalSessionManagerConfig) {
   const maxBufferBytes = config.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
 
-  function getSnapshot(target: TerminalSessionTarget): TerminalSessionState {
+  function rememberTarget(target: TerminalSessionTarget): string | null {
     const targetKey = getTerminalSessionTargetKey(target);
+    const knownTarget = toKnownTarget(target);
+    if (targetKey === null || knownTarget === null) {
+      return null;
+    }
+
+    const current = config.getRegistry().get(knownTerminalSessionsAtom);
+    const existing = current[targetKey];
+    if (
+      existing?.environmentId === knownTarget.environmentId &&
+      existing.threadId === knownTarget.threadId &&
+      existing.terminalId === knownTarget.terminalId
+    ) {
+      return targetKey;
+    }
+
+    config.getRegistry().set(knownTerminalSessionsAtom, {
+      ...current,
+      [targetKey]: knownTarget,
+    });
+    return targetKey;
+  }
+
+  function removeTargets(match: (target: KnownTerminalSessionTarget) => boolean): void {
+    const current = config.getRegistry().get(knownTerminalSessionsAtom);
+    const next = Object.fromEntries(
+      Object.entries(current).filter(([, target]) => !match(target)),
+    ) as Record<string, KnownTerminalSessionTarget>;
+    if (Object.keys(next).length === Object.keys(current).length) {
+      return;
+    }
+
+    config.getRegistry().set(knownTerminalSessionsAtom, next);
+  }
+
+  function getSnapshot(target: TerminalSessionTarget): TerminalSessionState {
+    const targetKey = rememberTarget(target);
     if (targetKey === null) {
       return EMPTY_TERMINAL_SESSION_STATE;
     }
@@ -95,11 +166,27 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     config.getRegistry().set(terminalSessionStateAtom(targetKey), nextState);
   }
 
+  function syncSnapshot(
+    target: Pick<TerminalSessionTarget, "environmentId">,
+    snapshot: TerminalSessionSnapshot,
+  ): void {
+    const targetKey = rememberTarget({
+      environmentId: target.environmentId,
+      threadId: snapshot.threadId,
+      terminalId: snapshot.terminalId,
+    });
+    if (targetKey === null) {
+      return;
+    }
+
+    setState(targetKey, stateFromSnapshot(snapshot, maxBufferBytes));
+  }
+
   function applyEvent(
     target: Pick<TerminalSessionTarget, "environmentId">,
     event: TerminalEvent,
   ): void {
-    const targetKey = getTerminalSessionTargetKey({
+    const targetKey = rememberTarget({
       environmentId: target.environmentId,
       threadId: event.threadId,
       terminalId: event.terminalId,
@@ -151,6 +238,23 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
           version: current.version + 1,
         });
         return;
+      case "closed":
+        setState(targetKey, {
+          ...current,
+          snapshot: null,
+          status: "closed",
+          error: null,
+          hasRunningSubprocess: false,
+          updatedAt: event.createdAt,
+          version: current.version + 1,
+        });
+        removeTargets(
+          (knownTarget) =>
+            knownTarget.environmentId === target.environmentId &&
+            knownTarget.threadId === event.threadId &&
+            knownTarget.terminalId === event.terminalId,
+        );
+        return;
       case "error":
         setState(targetKey, {
           ...current,
@@ -193,10 +297,43 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
         setState(key, EMPTY_TERMINAL_SESSION_STATE);
       }
     }
+    removeTargets((target) => target.environmentId === environmentId);
   }
 
   function reset(): void {
     invalidate();
+    config.getRegistry().set(knownTerminalSessionsAtom, {});
+  }
+
+  function listSessions(
+    filter?: Partial<KnownTerminalSessionTarget>,
+  ): ReadonlyArray<KnownTerminalSession> {
+    const knownTargets = Object.values(config.getRegistry().get(knownTerminalSessionsAtom));
+    return knownTargets
+      .filter((target) => {
+        if (filter?.environmentId && target.environmentId !== filter.environmentId) {
+          return false;
+        }
+        if (filter?.threadId && target.threadId !== filter.threadId) {
+          return false;
+        }
+        if (filter?.terminalId && target.terminalId !== filter.terminalId) {
+          return false;
+        }
+        return true;
+      })
+      .map((target) => ({
+        target,
+        state: getSnapshot(target),
+      }))
+      .sort((left, right) => {
+        const leftUpdatedAt = left.state.updatedAt ? Date.parse(left.state.updatedAt) : 0;
+        const rightUpdatedAt = right.state.updatedAt ? Date.parse(right.state.updatedAt) : 0;
+        if (leftUpdatedAt !== rightUpdatedAt) {
+          return rightUpdatedAt - leftUpdatedAt;
+        }
+        return left.target.terminalId.localeCompare(right.target.terminalId);
+      });
   }
 
   return {
@@ -204,6 +341,8 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     getSnapshot,
     invalidate,
     invalidateEnvironment,
+    listSessions,
+    syncSnapshot,
     reset,
   };
 }

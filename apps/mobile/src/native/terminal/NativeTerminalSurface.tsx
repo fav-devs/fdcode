@@ -1,5 +1,4 @@
 import { memo, useCallback } from "react";
-import { requireNativeViewManager } from "expo-modules-core";
 import {
   Pressable,
   ScrollView,
@@ -8,9 +7,16 @@ import {
   type LayoutChangeEvent,
   type NativeSyntheticEvent,
   type ViewProps,
+  useColorScheme,
 } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
+import { resolveNativeTerminalSurfaceView } from "./nativeTerminalModule";
+import {
+  buildGhosttyThemeConfig,
+  getGitHubTerminalTheme,
+  type TerminalTheme,
+} from "./terminalTheme";
 
 interface TerminalInputEvent {
   readonly data: string;
@@ -21,40 +27,15 @@ interface TerminalResizeEvent {
   readonly rows: number;
 }
 
-interface NativeTerminalSurfaceProps extends ViewProps {
-  readonly terminalKey: string;
-  readonly initialBuffer: string;
-  readonly fontSize: number;
-  readonly onInput?: (event: NativeSyntheticEvent<TerminalInputEvent>) => void;
-  readonly onResize?: (event: NativeSyntheticEvent<TerminalResizeEvent>) => void;
-}
-
 interface TerminalSurfaceProps extends ViewProps {
   readonly terminalKey: string;
   readonly buffer: string;
   readonly fontSize?: number;
   readonly isRunning: boolean;
+  readonly theme?: TerminalTheme;
   readonly onInput: (data: string) => void;
   readonly onResize: (size: { readonly cols: number; readonly rows: number }) => void;
 }
-
-const NATIVE_COMPONENT_NAME = "T3TerminalSurface";
-function resolveNativeTerminalSurface() {
-  const expoGlobal = globalThis as typeof globalThis & {
-    expo?: {
-      getViewConfig?: (moduleName: string, viewName?: string) => unknown;
-    };
-  };
-  if (expoGlobal.expo?.getViewConfig?.(NATIVE_COMPONENT_NAME) == null) {
-    return null;
-  }
-
-  return requireNativeViewManager<NativeTerminalSurfaceProps>(NATIVE_COMPONENT_NAME);
-}
-
-const NativeTerminalSurfaceView = resolveNativeTerminalSurface();
-
-export const hasNativeTerminalSurface = NativeTerminalSurfaceView !== null;
 
 function estimateGridSize(input: {
   readonly width: number;
@@ -71,8 +52,10 @@ function estimateGridSize(input: {
 
 const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: TerminalSurfaceProps) {
   const fontSize = props.fontSize ?? 12;
+  const appearanceScheme = useColorScheme() === "light" ? "light" : "dark";
+  const theme = props.theme ?? getGitHubTerminalTheme(appearanceScheme);
   const statusLabel = props.isRunning
-    ? "Native terminal module not linked. Using text fallback."
+    ? "Native terminal unavailable. Using text fallback."
     : "Open terminal to start a shell.";
 
   const handleLayout = (event: LayoutChangeEvent) => {
@@ -85,7 +68,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
       style={[
         {
           flex: 1,
-          backgroundColor: "#050505",
+          backgroundColor: theme.background,
           borderRadius: 8,
           overflow: "hidden",
         },
@@ -94,7 +77,15 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
       onLayout={handleLayout}
     >
       <View style={{ flex: 1, paddingHorizontal: 10, paddingVertical: 8 }}>
-        <Text className="pb-2 text-[11px] text-neutral-500">{statusLabel}</Text>
+        <Text
+          style={{
+            color: theme.mutedForeground,
+            fontSize: 11,
+            paddingBottom: 8,
+          }}
+        >
+          {statusLabel}
+        </Text>
         <ScrollView
           style={{ flex: 1 }}
           contentContainerStyle={{ paddingBottom: 12 }}
@@ -103,7 +94,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
           <Text
             selectable
             style={{
-              color: "#f5f5f5",
+              color: theme.foreground,
               fontFamily: "Menlo",
               fontSize,
               lineHeight: Math.round(fontSize * 1.35),
@@ -116,7 +107,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
       <View
         style={{
           borderTopWidth: 1,
-          borderTopColor: "rgba(255,255,255,0.12)",
+          borderTopColor: theme.border,
           flexDirection: "row",
           alignItems: "center",
           gap: 8,
@@ -129,10 +120,10 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
           blurOnSubmit={false}
           editable={props.isRunning}
           placeholder="type and press return"
-          placeholderTextColor="#737373"
+          placeholderTextColor={theme.mutedForeground}
           returnKeyType="send"
           style={{
-            color: "#f5f5f5",
+            color: theme.foreground,
             flex: 1,
             fontFamily: "Menlo",
             fontSize: 13,
@@ -152,11 +143,19 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
             paddingHorizontal: 10,
             paddingVertical: 6,
             borderRadius: 8,
-            backgroundColor: "rgba(255,255,255,0.1)",
+            backgroundColor: theme.border,
           })}
           onPress={() => props.onInput("\u0003")}
         >
-          <Text className="font-t3-bold text-[11px] text-neutral-200">Ctrl-C</Text>
+          <Text
+            style={{
+              color: theme.foreground,
+              fontFamily: "DMSans_700Bold",
+              fontSize: 11,
+            }}
+          >
+            Ctrl-C
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -165,7 +164,10 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
 
 export const TerminalSurface = memo(function TerminalSurface(props: TerminalSurfaceProps) {
   const fontSize = props.fontSize ?? 12;
+  const appearanceScheme = useColorScheme() === "light" ? "light" : "dark";
+  const theme = props.theme ?? getGitHubTerminalTheme(appearanceScheme);
   const { onInput, onResize } = props;
+  const NativeTerminalSurfaceView = resolveNativeTerminalSurfaceView();
   const handleNativeInput = useCallback(
     (event: NativeSyntheticEvent<TerminalInputEvent>) => {
       onInput(event.nativeEvent.data);
@@ -186,14 +188,19 @@ export const TerminalSurface = memo(function TerminalSurface(props: TerminalSurf
     return (
       <NativeTerminalSurfaceView
         {...props}
+        appearanceScheme={appearanceScheme}
+        backgroundColor={theme.background}
+        foregroundColor={theme.foreground}
+        mutedForegroundColor={theme.mutedForeground}
         terminalKey={props.terminalKey}
         initialBuffer={props.buffer}
         fontSize={fontSize}
+        themeConfig={buildGhosttyThemeConfig(theme)}
         onInput={handleNativeInput}
         onResize={handleNativeResize}
       />
     );
   }
 
-  return <FallbackTerminalSurface {...props} fontSize={fontSize} />;
+  return <FallbackTerminalSurface {...props} fontSize={fontSize} theme={theme} />;
 });

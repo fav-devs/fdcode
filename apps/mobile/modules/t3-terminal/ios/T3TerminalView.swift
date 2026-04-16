@@ -1,4 +1,5 @@
 import ExpoModulesCore
+import Foundation
 import GhosttyKit
 import QuartzCore
 import UIKit
@@ -21,18 +22,65 @@ private enum GhosttyRuntime {
   }
 }
 
+private final class TerminalInputField: UITextField {
+  var onDeleteBackward: (() -> Void)?
+
+  override func deleteBackward() {
+    onDeleteBackward?()
+    super.deleteBackward()
+  }
+}
+
+private enum TerminalAppearanceScheme: String {
+  case light
+  case dark
+
+  init(value: String) {
+    self = TerminalAppearanceScheme(rawValue: value) ?? .dark
+  }
+
+  var ghosttyColorScheme: ghostty_color_scheme_e {
+    switch self {
+    case .light:
+      return GHOSTTY_COLOR_SCHEME_LIGHT
+    case .dark:
+      return GHOSTTY_COLOR_SCHEME_DARK
+    }
+  }
+}
+
+private extension UIColor {
+  convenience init(hexString: String) {
+    let sanitized = hexString.replacingOccurrences(of: "#", with: "")
+    let value = Int(sanitized, radix: 16) ?? 0
+    self.init(
+      red: CGFloat((value >> 16) & 0xFF) / 255,
+      green: CGFloat((value >> 8) & 0xFF) / 255,
+      blue: CGFloat(value & 0xFF) / 255,
+      alpha: 1
+    )
+  }
+}
+
 public final class T3TerminalView: ExpoView, UITextFieldDelegate {
+  private static let minimumVerticalScrollStepPoints: CGFloat = 18
+  private static let verticalScrollStepMultiplier: CGFloat = 1.15
+
   private let terminalViewport = UIView()
-  private let inputField = UITextField()
-  private let inputDivider = UIView()
+  private let inputField = TerminalInputField()
+  private let focusTapGesture = UITapGestureRecognizer()
+  private let scrollPanGesture = UIPanGestureRecognizer()
   private var lastViewportSize: CGSize = .zero
   private var lastContentScale: CGFloat = 0
   private var lastReportedGrid: (cols: Int, rows: Int)?
   private var lastAppliedBuffer = ""
+  private var pendingVerticalScrollPoints: CGFloat = 0
   private var app: ghostty_app_t?
   private var surface: ghostty_surface_t?
   private var isCreatingSurface = false
   private var surfaceCreationFailed = false
+  private var appearance = TerminalAppearanceScheme.dark
+  private var backgroundColorValue = UIColor(hexString: "#24292e")
 
   let onInput = EventDispatcher()
   let onResize = EventDispatcher()
@@ -59,58 +107,84 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     }
   }
 
+  var appearanceScheme: String = TerminalAppearanceScheme.dark.rawValue {
+    didSet {
+      appearance = TerminalAppearanceScheme(value: appearanceScheme)
+      updateGhosttyTheme()
+    }
+  }
+
+  var themeConfig: String = "" {
+    didSet {
+      updateGhosttyTheme()
+    }
+  }
+
+  var backgroundColorHex: String = "#24292e" {
+    didSet {
+      backgroundColorValue = UIColor(hexString: backgroundColorHex)
+      applyTheme()
+    }
+  }
+
+  var foregroundColorHex: String = "#d1d5da"
+  var mutedForegroundColorHex: String = "#959da5"
+
   public required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
 
-    backgroundColor = UIColor.black
+    applyTheme()
     clipsToBounds = true
     contentScaleFactor = UIScreen.main.scale
 
-    terminalViewport.backgroundColor = UIColor.black
     terminalViewport.clipsToBounds = true
     terminalViewport.contentScaleFactor = contentScaleFactor
     terminalViewport.translatesAutoresizingMaskIntoConstraints = false
-
-    inputDivider.backgroundColor = UIColor(white: 1, alpha: 0.12)
-    inputDivider.translatesAutoresizingMaskIntoConstraints = false
+    terminalViewport.isUserInteractionEnabled = true
 
     inputField.delegate = self
-    inputField.backgroundColor = UIColor.black
-    inputField.textColor = UIColor(white: 0.96, alpha: 1)
-    inputField.tintColor = UIColor(white: 0.96, alpha: 1)
+    inputField.backgroundColor = UIColor.clear
+    inputField.textColor = UIColor.clear
+    inputField.tintColor = UIColor.clear
     inputField.font = UIFont.monospacedSystemFont(ofSize: max(fontSize, 13), weight: .regular)
-    inputField.placeholder = "type and press return"
-    inputField.attributedPlaceholder = NSAttributedString(
-      string: "type and press return",
-      attributes: [.foregroundColor: UIColor(white: 0.45, alpha: 1)]
-    )
+    inputField.placeholder = ""
     inputField.autocorrectionType = .no
     inputField.autocapitalizationType = .none
     inputField.spellCheckingType = .no
     inputField.smartDashesType = .no
     inputField.smartQuotesType = .no
     inputField.returnKeyType = .send
+    inputField.keyboardType = .asciiCapable
+    inputField.enablesReturnKeyAutomatically = false
     inputField.translatesAutoresizingMaskIntoConstraints = false
+    inputField.alpha = 0.02
+    inputField.isAccessibilityElement = false
+    inputField.accessibilityElementsHidden = true
+    inputField.addTarget(self, action: #selector(handleInputEditingDidBegin), for: .editingDidBegin)
+    inputField.onDeleteBackward = { [weak self] in
+      self?.emitInput("\u{7F}")
+    }
+
+    focusTapGesture.addTarget(self, action: #selector(handleViewportTap))
+    terminalViewport.addGestureRecognizer(focusTapGesture)
+    scrollPanGesture.addTarget(self, action: #selector(handleViewportPan(_:)))
+    scrollPanGesture.maximumNumberOfTouches = 1
+    scrollPanGesture.cancelsTouchesInView = false
+    terminalViewport.addGestureRecognizer(scrollPanGesture)
 
     addSubview(terminalViewport)
-    addSubview(inputDivider)
     addSubview(inputField)
 
     NSLayoutConstraint.activate([
       terminalViewport.leadingAnchor.constraint(equalTo: leadingAnchor),
       terminalViewport.trailingAnchor.constraint(equalTo: trailingAnchor),
       terminalViewport.topAnchor.constraint(equalTo: topAnchor),
-      terminalViewport.bottomAnchor.constraint(equalTo: inputDivider.topAnchor),
+      terminalViewport.bottomAnchor.constraint(equalTo: bottomAnchor),
 
-      inputDivider.leadingAnchor.constraint(equalTo: leadingAnchor),
-      inputDivider.trailingAnchor.constraint(equalTo: trailingAnchor),
-      inputDivider.bottomAnchor.constraint(equalTo: inputField.topAnchor),
-      inputDivider.heightAnchor.constraint(equalToConstant: 1),
-
-      inputField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 10),
-      inputField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -10),
-      inputField.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
-      inputField.heightAnchor.constraint(equalToConstant: 32),
+      inputField.trailingAnchor.constraint(equalTo: trailingAnchor),
+      inputField.topAnchor.constraint(equalTo: bottomAnchor, constant: 8),
+      inputField.widthAnchor.constraint(equalToConstant: 1),
+      inputField.heightAnchor.constraint(equalToConstant: 1),
     ])
   }
 
@@ -136,13 +210,78 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     resizeSurface()
   }
 
-  public func textFieldShouldReturn(_ textField: UITextField) -> Bool {
-    let text = textField.text ?? ""
-    if !text.isEmpty {
-      onInput(["data": "\(text)\n"])
-      textField.text = ""
+  public override func didMoveToWindow() {
+    super.didMoveToWindow()
+
+    guard window != nil else { return }
+    DispatchQueue.main.async { [weak self] in
+      self?.requestKeyboardFocus()
     }
+  }
+
+  public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
+    if !string.isEmpty {
+      emitInput(string)
+      return false
+    }
+
     return false
+  }
+
+  public func textFieldShouldReturn(_ textField: UITextField) -> Bool {
+    emitInput("\n")
+    textField.text = ""
+    return false
+  }
+
+  @objc
+  private func handleViewportTap() {
+    requestKeyboardFocus()
+  }
+
+  @objc
+  private func handleViewportPan(_ gesture: UIPanGestureRecognizer) {
+    guard let surface else { return }
+
+    let location = gesture.location(in: terminalViewport)
+    ghostty_surface_mouse_pos(
+      surface,
+      Double(location.x * contentScaleFactor),
+      Double(location.y * contentScaleFactor),
+      GHOSTTY_MODS_NONE
+    )
+
+    switch gesture.state {
+    case .began:
+      pendingVerticalScrollPoints = 0
+      gesture.setTranslation(.zero, in: terminalViewport)
+    case .changed:
+      let translation = gesture.translation(in: terminalViewport)
+      let stepSize = max(
+        fontSize * Self.verticalScrollStepMultiplier,
+        Self.minimumVerticalScrollStepPoints
+      )
+      let totalVerticalPoints = pendingVerticalScrollPoints + translation.y
+      let verticalSteps = Int(totalVerticalPoints / stepSize)
+      pendingVerticalScrollPoints = totalVerticalPoints - (CGFloat(verticalSteps) * stepSize)
+
+      guard verticalSteps != 0 else {
+        gesture.setTranslation(.zero, in: terminalViewport)
+        return
+      }
+
+      ghostty_surface_mouse_scroll(surface, 0, Double(verticalSteps), 0)
+      redrawSurface()
+      gesture.setTranslation(.zero, in: terminalViewport)
+    default:
+      pendingVerticalScrollPoints = 0
+      gesture.setTranslation(.zero, in: terminalViewport)
+    }
+  }
+
+  @objc
+  private func handleInputEditingDidBegin() {
+    textInputModeDidChange()
   }
 
   private func createSurfaceIfPossible() {
@@ -171,6 +310,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
       surfaceCreationFailed = true
       return
     }
+    loadThemeConfig(into: config)
     ghostty_config_finalize(config)
     defer { ghostty_config_free(config) }
 
@@ -196,6 +336,8 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
 
     app = createdApp
     surface = createdSurface
+    ghostty_app_set_color_scheme(createdApp, appearance.ghosttyColorScheme)
+    ghostty_surface_set_color_scheme(createdSurface, appearance.ghosttyColorScheme)
     setupWriteCallback()
     resizeSurface()
     feedBuffer(initialBuffer)
@@ -320,7 +462,7 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     let cellWidth = max(fontSize * 0.62, 1)
     let cellHeight = max(fontSize * 1.35, 1)
     let cols = max(20, min(400, Int(bounds.width / cellWidth)))
-    let terminalHeight = max(bounds.height - 41, 0)
+    let terminalHeight = max(bounds.height, 0)
     let rows = max(5, min(200, Int(terminalHeight / cellHeight)))
     emitResize(cols: cols, rows: rows)
   }
@@ -344,6 +486,22 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     }
   }
 
+  private func requestKeyboardFocus() {
+    guard window != nil else { return }
+    inputField.becomeFirstResponder()
+    textInputModeDidChange()
+  }
+
+  private func emitInput(_ data: String) {
+    guard !data.isEmpty else { return }
+    onInput(["data": data])
+  }
+
+  private func textInputModeDidChange() {
+    guard let app else { return }
+    ghostty_app_keyboard_changed(app)
+  }
+
   private func configureIOSurfaceLayers() {
     let targetBounds = CGRect(origin: .zero, size: terminalViewport.bounds.size)
     CATransaction.begin()
@@ -359,6 +517,49 @@ public final class T3TerminalView: ExpoView, UITextFieldDelegate {
     terminalViewport.layer.setNeedsDisplay()
     terminalViewport.layer.sublayers?.forEach { layer in
       layer.setNeedsDisplay()
+    }
+  }
+
+  private func applyTheme() {
+    backgroundColor = backgroundColorValue
+    terminalViewport.backgroundColor = backgroundColorValue
+  }
+
+  private func updateGhosttyTheme() {
+    guard let app, let surface else { return }
+    guard let config = ghostty_config_new() else { return }
+    loadThemeConfig(into: config)
+    ghostty_config_finalize(config)
+    ghostty_app_update_config(app, config)
+    ghostty_surface_update_config(surface, config)
+    ghostty_app_set_color_scheme(app, appearance.ghosttyColorScheme)
+    ghostty_surface_set_color_scheme(surface, appearance.ghosttyColorScheme)
+    ghostty_config_free(config)
+    redrawSurface()
+  }
+
+  private func loadThemeConfig(into config: ghostty_config_t) {
+    guard let path = writeThemeConfigFile() else { return }
+    path.withCString { cString in
+      ghostty_config_load_file(config, cString)
+    }
+  }
+
+  private func writeThemeConfigFile() -> String? {
+    guard !themeConfig.isEmpty else { return nil }
+    let configContents = themeConfig
+    let url = URL(fileURLWithPath: NSTemporaryDirectory())
+      .appendingPathComponent("t3-terminal-theme-\(appearance.rawValue).ghostty")
+
+    do {
+      if let existing = try? String(contentsOf: url, encoding: .utf8), existing == configContents {
+        return url.path
+      }
+
+      try configContents.write(to: url, atomically: true, encoding: .utf8)
+      return url.path
+    } catch {
+      return nil
     }
   }
 }
