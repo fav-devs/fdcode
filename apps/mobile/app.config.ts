@@ -14,22 +14,22 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   development: {
-    appName: "T3 Code Dev",
+    appName: "fdcode Dev",
     iosIcon: "./assets/icon-composer-dev.icon",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
+    iosBundleIdentifier: "com.favdevs.fdcode.dev",
+    androidPackage: "com.favdevs.fdcode.dev",
   },
   preview: {
-    appName: "T3 Code Preview",
+    appName: "fdcode Preview",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
+    iosBundleIdentifier: "com.favdevs.fdcode.preview",
+    androidPackage: "com.favdevs.fdcode.preview",
   },
   production: {
-    appName: "T3 Code",
+    appName: "fdcode",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
+    iosBundleIdentifier: "com.favdevs.fdcode",
+    androidPackage: "com.favdevs.fdcode",
   },
 };
 
@@ -48,8 +48,8 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
-  scheme: "t3code",
+  slug: "fdcode",
+  scheme: "fdcode",
   version: "0.1.0",
   runtimeVersion: {
     policy: "appVersion",
@@ -59,7 +59,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   updates: {
     enabled: true,
-    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+    url: "https://u.expo.dev/d579208b-1405-4c71-b868-315979b80026",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -97,7 +97,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow fdcode to access your camera so you can scan pairing QR codes.",
         barcodeScannerEnabled: true,
       },
     ],
@@ -121,10 +121,10 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     eas: {
-      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
+      projectId: "d579208b-1405-4c71-b868-315979b80026",
     },
   },
-  owner: "pingdotgg",
+  owner: "babalolafavour",
 };
 
 export default config;

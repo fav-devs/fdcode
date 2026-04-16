@@ -4,7 +4,7 @@ import * as SecureStore from "expo-secure-store";
 
 import type { SavedRemoteConnection } from "./connection";
 
-const CONNECTIONS_KEY = "t3code.connections";
+const CONNECTIONS_KEY = "fdcode.connections";
 
 async function readStorageItem(key: string): Promise<string | null> {
   return await SecureStore.getItemAsync(key);
