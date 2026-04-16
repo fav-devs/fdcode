@@ -74,8 +74,16 @@ import {
   selectThreadByRef,
   useStore,
 } from "../store";
+<<<<<<< HEAD
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadRunningTerminalIds } from "../terminalSessionState";
+=======
+import {
+  selectThreadTerminalState,
+  useTerminalStateStore,
+  useThreadTerminalOpen,
+} from "../terminalStateStore";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
@@ -180,6 +188,7 @@ import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
+<<<<<<< HEAD
 import type { SidebarThreadSummary } from "../types";
 import { usePinnedThreadsStore } from "../pinnedThreadsStore";
 import {
@@ -188,6 +197,12 @@ import {
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
 } from "../sidebarProjectGrouping";
+=======
+import { serverThreadSurfaceInput, type WorkspaceLayoutEngine } from "../workspace/types";
+import { useWorkspaceDragStore } from "../workspace/dragStore";
+import { useWorkspaceLayoutEngine, useWorkspaceStore } from "../workspace/store";
+import type { Project, SidebarThreadSummary } from "../types";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 const THREAD_PREVIEW_LIMIT = 6;
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: "Last user message",
@@ -989,9 +1004,20 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const removeFromSelection = useThreadSelectionStore((state) => state.removeFromSelection);
   const setSelectionAnchor = useThreadSelectionStore((state) => state.setAnchor);
   const selectedThreadCount = useThreadSelectionStore((state) => state.selectedThreadKeys.size);
+<<<<<<< HEAD
   const pinnedThreadKeys = usePinnedThreadsStore((state) => state.pinnedThreadKeys);
   const togglePinnedThread = usePinnedThreadsStore((state) => state.togglePinnedThread);
   const pinnedThreadKeySet = useMemo(() => new Set(pinnedThreadKeys), [pinnedThreadKeys]);
+=======
+  const openThreadInSplit = useWorkspaceStore((state) => state.openThreadInSplit);
+  const clearComposerDraftForThread = useComposerDraftStore((state) => state.clearDraftThread);
+  const getDraftThreadByProjectRef = useComposerDraftStore(
+    (state) => state.getDraftThreadByProjectRef,
+  );
+  const clearProjectDraftThreadId = useComposerDraftStore(
+    (state) => state.clearProjectDraftThreadId,
+  );
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
     threadId: ThreadId;
   }>({
@@ -1920,6 +1946,11 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? project.cwd ?? null;
       const clicked = await api.contextMenu.show(
         [
+<<<<<<< HEAD
+=======
+          { id: "open-split-right", label: "Open in split right" },
+          { id: "open-split-down", label: "Open in split down" },
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
           { id: "rename", label: "Rename thread" },
           {
             id: "toggle-pin",
@@ -1933,6 +1964,27 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         position,
       );
 
+<<<<<<< HEAD
+=======
+      if (clicked === "open-split-right") {
+        openThreadInSplit(serverThreadSurfaceInput(threadRef), "x");
+        void router.navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(threadRef),
+        });
+        return;
+      }
+
+      if (clicked === "open-split-down") {
+        openThreadInSplit(serverThreadSurfaceInput(threadRef), "y");
+        void router.navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(threadRef),
+        });
+        return;
+      }
+
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       if (clicked === "rename") {
         setRenamingThreadKey(threadKey);
         setRenamingTitle(thread.title);
@@ -1984,8 +2036,12 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       copyThreadIdToClipboard,
       deleteThread,
       markThreadUnread,
+<<<<<<< HEAD
       memberProjectByScopedKey,
       pinnedThreadKeySet,
+=======
+      openThreadInSplit,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       project.cwd,
       togglePinnedThread,
     ],
@@ -2452,6 +2508,8 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const layoutEngine = useWorkspaceLayoutEngine();
+  const setLayoutEngine = useWorkspaceStore((state) => state.setLayoutEngine);
   const handleSettingsClick = useCallback(() => {
     void navigate({ to: "/settings" });
   }, [navigate]);
@@ -2471,10 +2529,18 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
+      <div className="mt-2 flex items-center gap-1 px-2">
+        <span className="text-[11px] text-muted-foreground/70">Layout</span>
+        <WorkspaceLayoutToggle
+          layoutEngine={layoutEngine}
+          onSelect={(engine) => setLayoutEngine(engine)}
+        />
+      </div>
     </SidebarFooter>
   );
 });
 
+<<<<<<< HEAD
 const SidebarPinnedThreadsContent = memo(function SidebarPinnedThreadsContent({
   pinnedThreads,
   routeThreadKey,
@@ -2590,6 +2656,29 @@ const SidebarPinnedThreadsContent = memo(function SidebarPinnedThreadsContent({
         })}
       </SidebarMenu>
     </SidebarGroup>
+=======
+const WorkspaceLayoutToggle = memo(function WorkspaceLayoutToggle(props: {
+  layoutEngine: WorkspaceLayoutEngine;
+  onSelect: (engine: WorkspaceLayoutEngine) => void;
+}) {
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      {(["split", "paper"] as const).map((engine) => (
+        <button
+          key={engine}
+          type="button"
+          className={
+            props.layoutEngine === engine
+              ? "rounded-md border border-border bg-accent px-2 py-1 text-[11px] text-foreground"
+              : "rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          }
+          onClick={() => props.onSelect(engine)}
+        >
+          {engine === "split" ? "Split" : "Paper"}
+        </button>
+      ))}
+    </div>
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   );
 });
 
@@ -3031,6 +3120,10 @@ export default function Sidebar() {
     select: (params) => resolveThreadRouteRef(params),
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+<<<<<<< HEAD
+=======
+  const routeThreadTerminalOpen = useThreadTerminalOpen(routeThreadRef);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   const keybindings = useServerKeybindings();
   const welcome = useServerWelcome();
   const homeDir = welcome?.cwd ?? null;

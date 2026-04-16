@@ -9,8 +9,14 @@ import {
 } from "../lib/chatThreadActions";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { resolveShortcutCommand } from "../keybindings";
+<<<<<<< HEAD
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadSelectionStore } from "../threadSelectionStore";
+=======
+import { useThreadTerminalOpen } from "../terminalStateStore";
+import { useThreadSelectionStore } from "../threadSelectionStore";
+import { useFocusedWorkspaceSurface, useWorkspaceStore } from "../workspace/store";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 import { resolveSidebarNewThreadEnvMode } from "~/components/Sidebar.logic";
 import { useSettings } from "~/hooks/useSettings";
 import { useServerKeybindings } from "~/rpc/serverState";
@@ -21,11 +27,15 @@ function ChatRouteGlobalShortcuts() {
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread, routeThreadRef } =
     useHandleNewThread();
   const keybindings = useServerKeybindings();
+<<<<<<< HEAD
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+=======
+  const terminalOpen = useThreadTerminalOpen(routeThreadRef);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   const appSettings = useSettings();
 
   useEffect(() => {
@@ -37,6 +47,39 @@ function ChatRouteGlobalShortcuts() {
           terminalOpen,
         },
       });
+<<<<<<< HEAD
+=======
+      const isFocusedStandaloneTerminal = focusedWorkspaceSurface?.kind === "terminal";
+      if (command && isWorkspaceCommandId(command)) {
+        event.preventDefault();
+        event.stopPropagation();
+        void executeWorkspaceCommand(command);
+        return;
+      }
+
+      if (isFocusedStandaloneTerminal) {
+        if (command === "terminal.split") {
+          event.preventDefault();
+          event.stopPropagation();
+          void executeWorkspaceCommand("workspace.terminal.splitRight");
+          return;
+        }
+
+        if (command === "terminal.new") {
+          event.preventDefault();
+          event.stopPropagation();
+          void executeWorkspaceCommand("workspace.terminal.splitDown");
+          return;
+        }
+
+        if (command === "terminal.close") {
+          event.preventDefault();
+          event.stopPropagation();
+          closeFocusedWindow();
+          return;
+        }
+      }
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
       if (useCommandPaletteStore.getState().open) {
         return;

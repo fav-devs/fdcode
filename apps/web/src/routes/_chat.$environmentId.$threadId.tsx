@@ -497,7 +497,27 @@ function ChatThreadRouteView() {
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) return;
+=======
+    if (!threadRef || !bootstrapComplete || !routeThreadExists) {
+      return;
+    }
+
+    openThreadSurface(
+      {
+        scope: "server",
+        threadRef,
+      },
+      "focus-or-replace",
+    );
+  }, [bootstrapComplete, openThreadSurface, routeThreadExists, threadRef]);
+
+  useEffect(() => {
+    if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) {
+      return;
+    }
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
     finalizePromotedDraftThreadByRef(threadRef);
   }, [draftThread?.promotedTo, serverThreadStarted, threadRef]);
 

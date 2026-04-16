@@ -68,8 +68,15 @@ import {
   selectSidebarThreadsAcrossEnvironments,
   useStore,
 } from "../store";
+<<<<<<< HEAD
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
+=======
+import { useThreadTerminalOpen } from "../terminalStateStore";
+import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
+import { useWorkspaceStore } from "../workspace/store";
+import { serverThreadSurfaceInput } from "../workspace/types";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 import {
   ADDON_ICON_CLASS,
   buildBrowseGroups,
@@ -149,11 +156,15 @@ export function CommandPalette({ children }: { children: ReactNode }) {
     select: (params) => resolveThreadRouteTarget(params),
   });
   const routeThreadRef = routeTarget?.kind === "server" ? routeTarget.threadRef : null;
+<<<<<<< HEAD
   const terminalOpen = useTerminalUiStateStore((state) =>
     routeThreadRef
       ? selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef).terminalOpen
       : false,
   );
+=======
+  const terminalOpen = useThreadTerminalOpen(routeThreadRef);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
   useEffect(() => {
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
@@ -690,7 +701,226 @@ function OpenCommandPaletteDialog() {
       icon: <FolderPlusIcon className={ITEM_ICON_CLASS} />,
       keepOpen: true,
       run: async () => {
+<<<<<<< HEAD
         openAddProjectFlow();
+=======
+        await executeWorkspaceCommand("workspace.terminal.splitDown");
+      },
+    });
+  }
+
+  if (canSplitFocusedPane) {
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-split-right",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.splitRight"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.splitRight"].title,
+      icon: <Columns2Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.splitRight",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.splitRight");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-split-down",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.splitDown"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.splitDown"].title,
+      icon: <Rows2Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.splitDown",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.splitDown");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-close",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.close"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.close"].title,
+      icon: <XIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.close",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.close");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-toggle-zoom",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.toggleZoom"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.toggleZoom"].title,
+      icon: <Columns2Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.toggleZoom",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.toggleZoom");
+      },
+    });
+  }
+
+  if (canUseSpatialWorkspaceCommands) {
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-previous",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.previous"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.previous"].title,
+      icon: <ArrowLeftIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.previous",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.previous");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-next",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.next"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.next"].title,
+      icon: <ArrowRightIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.next",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.next");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-left",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.left"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.left"].title,
+      icon: <ArrowLeftIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.left",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.left");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-right",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.right"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.right"].title,
+      icon: <ArrowRightIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.right",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.right");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-up",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.up"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.up"].title,
+      icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.up",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.up");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-focus-down",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.focus.down"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.focus.down"].title,
+      icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.focus.down",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.focus.down");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-resize-left",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeLeft"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeLeft"].title,
+      icon: <ArrowLeftIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.resizeLeft",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.resizeLeft");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-resize-right",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeRight"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeRight"].title,
+      icon: <ArrowRightIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.resizeRight",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.resizeRight");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-resize-up",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeUp"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeUp"].title,
+      icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.resizeUp",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.resizeUp");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-resize-down",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeDown"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.resizeDown"].title,
+      icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.resizeDown",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.resizeDown");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-equalize",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.equalize"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.equalize"].title,
+      icon: <Rows2Icon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.equalize",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.equalize");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-move-left",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.moveLeft"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.moveLeft"].title,
+      icon: <ArrowLeftIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.moveLeft",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.moveLeft");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-move-right",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.moveRight"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.moveRight"].title,
+      icon: <ArrowRightIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.moveRight",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.moveRight");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-move-up",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.moveUp"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.moveUp"].title,
+      icon: <ArrowUpIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.moveUp",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.moveUp");
+      },
+    });
+    actionItems.push({
+      kind: "action",
+      value: "action:workspace-pane-move-down",
+      searchTerms: WORKSPACE_COMMAND_METADATA["workspace.pane.moveDown"].searchTerms,
+      title: WORKSPACE_COMMAND_METADATA["workspace.pane.moveDown"].title,
+      icon: <ArrowDownIcon className={ITEM_ICON_CLASS} />,
+      shortcutCommand: "workspace.pane.moveDown",
+      run: async () => {
+        await executeWorkspaceCommand("workspace.pane.moveDown");
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       },
     });
   }

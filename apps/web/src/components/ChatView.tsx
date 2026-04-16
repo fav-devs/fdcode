@@ -30,7 +30,11 @@ import { applyClaudePromptEffortPrefix, createModelSelection } from "@t3tools/sh
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { truncate } from "@t3tools/shared/String";
 import { Debouncer } from "@tanstack/react-pacer";
+<<<<<<< HEAD
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+=======
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import { useGitStatus } from "~/lib/gitStatusState";
@@ -130,6 +134,7 @@ import {
 import {
   appendTerminalContextsToPrompt,
   formatTerminalContextLabel,
+  type TerminalContextSelection,
   type TerminalContextDraft,
   type TerminalContextSelection,
 } from "../lib/terminalContext";
@@ -145,8 +150,12 @@ import { NoActiveThreadState } from "./NoActiveThreadState";
 import { resolveEffectiveEnvMode, resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { ProviderStatusBanner } from "./chat/ProviderStatusBanner";
 import { ThreadErrorBanner } from "./chat/ThreadErrorBanner";
+<<<<<<< HEAD
 import { useServerWelcome } from "../rpc/serverState";
 import { isHomeChatContainerProject } from "../lib/chatProjects";
+=======
+import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 import {
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
   buildExpiredTerminalContextToastCopy,
@@ -162,7 +171,6 @@ import {
   cloneComposerImageForRetry,
   deriveLockedProvider,
   readFileAsDataUrl,
-  reconcileMountedTerminalThreadIds,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
   revokeUserMessagePreviewUrls,
@@ -178,7 +186,10 @@ import {
 } from "~/rpc/serverState";
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
+<<<<<<< HEAD
 import { RightPanelSheet } from "./RightPanelSheet";
+=======
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -727,6 +738,7 @@ export default function ChatView(props: ChatViewProps) {
   const terminalUiState = useTerminalUiStateStore((state) =>
     selectThreadTerminalUiState(state.terminalUiStateByThreadKey, routeThreadRef),
   );
+<<<<<<< HEAD
   const openTerminalThreadKeys = useTerminalUiStateStore(
     useShallow((state) =>
       Object.entries(state.terminalUiStateByThreadKey).flatMap(
@@ -734,6 +746,18 @@ export default function ChatView(props: ChatViewProps) {
           nextTerminalUiState.terminalOpen ? [nextThreadKey] : [],
       ),
     ),
+=======
+  const storeEnsureTerminal = useTerminalStateStore((s) => s.ensureTerminal);
+  const storeSetTerminalOpen = useTerminalStateStore((s) => s.setTerminalOpen);
+  const storeSetTerminalHeight = useTerminalStateStore((s) => s.setTerminalHeight);
+  const storeSplitTerminal = useTerminalStateStore((s) => s.splitTerminal);
+  const storeNewTerminal = useTerminalStateStore((s) => s.newTerminal);
+  const storeSetActiveTerminal = useTerminalStateStore((s) => s.setActiveTerminal);
+  const storeCloseTerminal = useTerminalStateStore((s) => s.closeTerminal);
+  const storeSetTerminalLaunchContext = useTerminalStateStore((s) => s.setTerminalLaunchContext);
+  const storeServerTerminalLaunchContext = useTerminalStateStore(
+    (s) => s.terminalLaunchContextByThreadKey[scopedThreadKey(routeThreadRef)] ?? null,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   );
   const storeSetTerminalOpen = useTerminalUiStateStore((s) => s.setTerminalOpen);
   const storeSplitTerminal = useTerminalUiStateStore((s) => s.splitTerminal);
@@ -764,6 +788,7 @@ export default function ChatView(props: ChatViewProps) {
       }),
     [mountedTerminalThreadKeys],
   );
+  const addTerminalContext = useComposerDraftStore((state) => state.addTerminalContext);
 
   const fallbackDraftProjectRef = draftThread
     ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
@@ -808,10 +833,13 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
+<<<<<<< HEAD
   const existingOpenTerminalThreadKeys = useMemo(() => {
     const existingThreadKeys = new Set<string>([...serverThreadKeys, ...draftThreadKeys]);
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
+=======
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   const activeLatestTurn = activeThread?.latestTurn ?? null;
   const threadPlanCatalog = useThreadPlanCatalog(
     useMemo(() => {
@@ -1466,10 +1494,17 @@ export default function ChatView(props: ChatViewProps) {
     () => ({
       context: {
         terminalFocus: false,
+<<<<<<< HEAD
         terminalOpen: Boolean(terminalUiState.terminalOpen),
       },
     }),
     [terminalUiState.terminalOpen],
+=======
+        terminalOpen: terminalState.terminalOpen,
+      },
+    }),
+    [terminalState.terminalOpen],
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   );
   const terminalToggleShortcutLabel = useMemo(
     () => shortcutLabelForCommand(keybindings, "terminal.toggle"),
@@ -1609,6 +1644,7 @@ export default function ChatView(props: ChatViewProps) {
       focusComposer();
     });
   }, [focusComposer]);
+<<<<<<< HEAD
   const addTerminalContextToDraft = useCallback((selection: TerminalContextSelection) => {
     composerRef.current?.addTerminalContext(selection);
   }, []);
@@ -1623,17 +1659,49 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadRef) return;
     setTerminalOpen(!terminalUiState.terminalOpen);
   }, [activeThreadRef, setTerminalOpen, terminalUiState.terminalOpen]);
+=======
+  const terminalDrawerOpen = terminalState.terminalOpen;
+  const toggleTerminalVisibility = useCallback(() => {
+    if (!activeThreadRef) return;
+    const nextOpen = !terminalDrawerOpen;
+    if (nextOpen) {
+      const terminalId =
+        terminalState.activeTerminalId ||
+        terminalState.terminalIds[0] ||
+        DEFAULT_THREAD_TERMINAL_ID;
+      storeEnsureTerminal(activeThreadRef, terminalId, { open: true, active: true });
+      setTerminalFocusRequestId((current) => current + 1);
+      return;
+    }
+    storeSetTerminalOpen(activeThreadRef, false);
+  }, [
+    activeThreadRef,
+    storeEnsureTerminal,
+    storeSetTerminalOpen,
+    terminalDrawerOpen,
+    terminalState.activeTerminalId,
+    terminalState.terminalIds,
+  ]);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   const splitTerminal = useCallback(() => {
     if (!activeThreadRef || hasReachedSplitLimit) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeSplitTerminal(activeThreadRef, terminalId);
+<<<<<<< HEAD
     setTerminalFocusRequestId((value) => value + 1);
+=======
+    setTerminalFocusRequestId((current) => current + 1);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   }, [activeThreadRef, hasReachedSplitLimit, storeSplitTerminal]);
   const createNewTerminal = useCallback(() => {
     if (!activeThreadRef) return;
     const terminalId = `terminal-${randomUUID()}`;
     storeNewTerminal(activeThreadRef, terminalId);
+<<<<<<< HEAD
     setTerminalFocusRequestId((value) => value + 1);
+=======
+    setTerminalFocusRequestId((current) => current + 1);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   }, [activeThreadRef, storeNewTerminal]);
   const closeTerminal = useCallback(
     (terminalId: string) => {
@@ -1673,6 +1741,17 @@ export default function ChatView(props: ChatViewProps) {
       terminalUiState.terminalIds.length,
     ],
   );
+  const handleAddTerminalContext = useCallback(
+    (selection: TerminalContextSelection) => {
+      addTerminalContext(routeThreadRef, {
+        ...selection,
+        id: randomUUID(),
+        threadId: routeThreadRef.threadId,
+        createdAt: new Date().toISOString(),
+      });
+    },
+    [addTerminalContext, routeThreadRef],
+  );
   const runProjectScript = useCallback(
     async (
       script: ProjectScript,
@@ -1710,16 +1789,24 @@ export default function ChatView(props: ChatViewProps) {
         cwd: targetCwd,
         worktreePath: targetWorktreePath,
       });
+<<<<<<< HEAD
       setTerminalOpen(true);
       if (!activeThreadRef) {
         return;
       }
+=======
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       if (shouldCreateNewTerminal) {
         storeNewTerminal(activeThreadRef, targetTerminalId);
       } else {
-        storeSetActiveTerminal(activeThreadRef, targetTerminalId);
+        storeEnsureTerminal(activeThreadRef, targetTerminalId, { open: true, active: true });
       }
+<<<<<<< HEAD
       setTerminalFocusRequestId((value) => value + 1);
+=======
+      storeSetTerminalOpen(activeThreadRef, true);
+      setTerminalFocusRequestId((current) => current + 1);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
       const runtimeEnv = projectScriptRuntimeEnv({
         project: {
@@ -1768,14 +1855,40 @@ export default function ChatView(props: ChatViewProps) {
       gitCwd,
       setTerminalOpen,
       setThreadError,
+      storeEnsureTerminal,
       storeNewTerminal,
+<<<<<<< HEAD
       storeSetActiveTerminal,
+=======
+      storeSetTerminalLaunchContext,
+      storeSetTerminalOpen,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       setLastInvokedScriptByProjectId,
       environmentId,
       runningTerminalIds,
       terminalUiState.activeTerminalId,
       terminalUiState.terminalIds,
     ],
+  );
+  const terminalDrawerWorktreePath =
+    storeServerTerminalLaunchContext?.worktreePath ?? activeThread?.worktreePath ?? null;
+  const terminalDrawerCwd =
+    storeServerTerminalLaunchContext?.cwd ??
+    (activeProject
+      ? projectScriptCwd({
+          project: { cwd: activeProject.cwd },
+          worktreePath: terminalDrawerWorktreePath,
+        })
+      : null);
+  const terminalDrawerRuntimeEnv = useMemo(
+    () =>
+      activeProject
+        ? projectScriptRuntimeEnv({
+            project: { cwd: activeProject.cwd },
+            worktreePath: terminalDrawerWorktreePath,
+          })
+        : {},
+    [activeProject, terminalDrawerWorktreePath],
   );
 
   const persistProjectScripts = useCallback(
@@ -2075,14 +2188,29 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThread?.id]);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (!activeThread?.id || terminalUiState.terminalOpen) return;
+=======
+    if (!activeThread?.id || terminalDrawerOpen) return;
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
     const frame = window.requestAnimationFrame(() => {
       focusComposer();
     });
     return () => {
       window.cancelAnimationFrame(frame);
     };
+<<<<<<< HEAD
   }, [activeThread?.id, focusComposer, terminalUiState.terminalOpen]);
+=======
+  }, [activeThread?.id, focusComposer, terminalDrawerOpen]);
+
+  useLayoutEffect(() => {
+    if (activationFocusRequestId === undefined) {
+      return;
+    }
+    focusComposer();
+  }, [activationFocusRequestId, focusComposer]);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
   useEffect(() => {
     if (!activeThread?.id) return;
@@ -2178,7 +2306,11 @@ export default function ChatView(props: ChatViewProps) {
   }, [activeThreadId]);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (!activeThreadId || !activeProjectCwd) {
+=======
+    if (terminalDrawerOpen) {
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       return;
     }
     setTerminalUiLaunchContext((current) => {
@@ -2203,6 +2335,7 @@ export default function ChatView(props: ChatViewProps) {
     if (terminalUiState.terminalOpen) {
       return;
     }
+<<<<<<< HEAD
     setTerminalUiLaunchContext((current) =>
       current?.threadId === activeThreadId ? null : current,
     );
@@ -2212,6 +2345,14 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeThreadKey) return;
     const previous = terminalUiOpenByThreadRef.current[activeThreadKey] ?? false;
     const current = Boolean(terminalUiState.terminalOpen);
+=======
+  }, [activeThreadRef, storeClearTerminalLaunchContext, terminalDrawerOpen]);
+
+  useEffect(() => {
+    if (!activeThreadKey) return;
+    const previous = terminalOpenByThreadRef.current[activeThreadKey] ?? false;
+    const current = terminalDrawerOpen;
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
     if (!previous && current) {
       terminalUiOpenByThreadRef.current[activeThreadKey] = current;
@@ -2227,8 +2368,13 @@ export default function ChatView(props: ChatViewProps) {
       };
     }
 
+<<<<<<< HEAD
     terminalUiOpenByThreadRef.current[activeThreadKey] = current;
   }, [activeThreadKey, focusComposer, terminalUiState.terminalOpen]);
+=======
+    terminalOpenByThreadRef.current[activeThreadKey] = current;
+  }, [activeThreadKey, focusComposer, terminalDrawerOpen]);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
 
   useEffect(() => {
     const handler = (event: globalThis.KeyboardEvent) => {
@@ -2237,7 +2383,11 @@ export default function ChatView(props: ChatViewProps) {
       }
       const shortcutContext = {
         terminalFocus: isTerminalFocused(),
+<<<<<<< HEAD
         terminalOpen: Boolean(terminalUiState.terminalOpen),
+=======
+        terminalOpen: terminalDrawerOpen,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
       };
 
       const command = resolveShortcutCommand(event, keybindings, {
@@ -2255,8 +2405,13 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "terminal.split") {
         event.preventDefault();
         event.stopPropagation();
+<<<<<<< HEAD
         if (!terminalUiState.terminalOpen) {
           setTerminalOpen(true);
+=======
+        if (!terminalDrawerOpen && activeThreadRef) {
+          storeSetTerminalOpen(activeThreadRef, true);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
         }
         splitTerminal();
         return;
@@ -2265,16 +2420,26 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "terminal.close") {
         event.preventDefault();
         event.stopPropagation();
+<<<<<<< HEAD
         if (!terminalUiState.terminalOpen) return;
         closeTerminal(terminalUiState.activeTerminalId);
+=======
+        if (!terminalDrawerOpen) return;
+        closeTerminal(terminalState.activeTerminalId);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
         return;
       }
 
       if (command === "terminal.new") {
         event.preventDefault();
         event.stopPropagation();
+<<<<<<< HEAD
         if (!terminalUiState.terminalOpen) {
           setTerminalOpen(true);
+=======
+        if (!terminalDrawerOpen && activeThreadRef) {
+          storeSetTerminalOpen(activeThreadRef, true);
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
         }
         createNewTerminal();
         return;
@@ -2304,11 +2469,20 @@ export default function ChatView(props: ChatViewProps) {
     activeThreadId,
     closeTerminal,
     createNewTerminal,
+<<<<<<< HEAD
     setTerminalOpen,
+=======
+    executeWorkspaceCommand,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
     runProjectScript,
     splitTerminal,
     keybindings,
     onToggleDiff,
+<<<<<<< HEAD
+=======
+    storeSetTerminalOpen,
+    terminalDrawerOpen,
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
     toggleTerminalVisibility,
   ]);
 
@@ -3237,7 +3411,11 @@ export default function ChatView(props: ChatViewProps) {
           keybindings={keybindings}
           availableEditors={availableEditors}
           terminalAvailable={activeProject !== undefined}
+<<<<<<< HEAD
           terminalOpen={terminalUiState.terminalOpen}
+=======
+          terminalOpen={terminalDrawerOpen}
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
           portsOpen={portsOpen}
@@ -3401,6 +3579,36 @@ export default function ChatView(props: ChatViewProps) {
               onExpandImage={onExpandTimelineImage}
             />
           </div>
+
+          {terminalDrawerOpen && activeThreadId && activeProject && terminalDrawerCwd ? (
+            <div className="min-h-0 px-3 pb-3 sm:px-5">
+              <ThreadTerminalDrawer
+                threadRef={routeThreadRef}
+                threadId={activeThreadId}
+                cwd={terminalDrawerCwd}
+                worktreePath={terminalDrawerWorktreePath}
+                runtimeEnv={terminalDrawerRuntimeEnv}
+                visible={terminalDrawerOpen}
+                height={terminalState.terminalHeight}
+                terminalIds={terminalState.terminalIds}
+                activeTerminalId={terminalState.activeTerminalId}
+                terminalGroups={terminalState.terminalGroups}
+                activeTerminalGroupId={terminalState.activeTerminalGroupId}
+                focusRequestId={terminalFocusRequestId}
+                onSplitTerminal={splitTerminal}
+                onNewTerminal={createNewTerminal}
+                onActiveTerminalChange={(terminalId) => {
+                  storeSetActiveTerminal(routeThreadRef, terminalId);
+                  setTerminalFocusRequestId((current) => current + 1);
+                }}
+                onCloseTerminal={closeTerminal}
+                onHeightChange={(height) => {
+                  storeSetTerminalHeight(routeThreadRef, height);
+                }}
+                onAddTerminalContext={handleAddTerminalContext}
+              />
+            </div>
+          ) : null}
 
           {isGitRepo && (
             <BranchToolbar

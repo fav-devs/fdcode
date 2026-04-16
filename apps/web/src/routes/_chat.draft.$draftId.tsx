@@ -54,6 +54,25 @@ function DraftChatThreadRouteView() {
     void navigate({ to: "/", replace: true });
   }, [canonicalThreadRef, draftSession, navigate]);
 
+<<<<<<< HEAD
+=======
+  useEffect(() => {
+    if (!draftSession || canonicalThreadRef) {
+      return;
+    }
+
+    openThreadSurface(
+      {
+        scope: "draft",
+        draftId,
+        environmentId: draftSession.environmentId,
+        threadId: draftSession.threadId,
+      },
+      "focus-or-replace",
+    );
+  }, [canonicalThreadRef, draftId, draftSession, openThreadSurface]);
+
+>>>>>>> b5281f99 (Add composable chat and workspace layout modes)
   if (canonicalThreadRef) {
     return (
       <SidebarInset className="h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)] min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground">
