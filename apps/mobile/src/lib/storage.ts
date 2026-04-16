@@ -4,8 +4,8 @@ import * as SecureStore from "expo-secure-store";
 
 import type { SavedRemoteConnection } from "./connection";
 
-const CONNECTIONS_KEY = "t3code.connections";
-const PREFERENCES_KEY = "t3code.preferences";
+const CONNECTIONS_KEY = "fdcode.connections";
+const PREFERENCES_KEY = "fdcode.preferences";
 
 export interface MobilePreferences {
   readonly terminalFontSize?: number;
