@@ -45,6 +45,8 @@ export const EMPTY_TERMINAL_SESSION_STATE = Object.freeze<TerminalSessionState>(
 
 const DEFAULT_MAX_BUFFER_BYTES = 512 * 1024;
 const knownTerminalSessionKeys = new Set<string>();
+const textEncoder = new TextEncoder();
+const textDecoder = new TextDecoder();
 
 export const terminalSessionStateAtom = Atom.family((key: string) => {
   knownTerminalSessionKeys.add(key);
@@ -92,11 +94,25 @@ function toKnownTarget(target: TerminalSessionTarget): KnownTerminalSessionTarge
 }
 
 function trimBufferToBytes(buffer: string, maxBufferBytes: number): string {
-  if (buffer.length <= maxBufferBytes) {
+  if (maxBufferBytes <= 0) {
+    return "";
+  }
+
+  const encoded = textEncoder.encode(buffer);
+  if (encoded.byteLength <= maxBufferBytes) {
     return buffer;
   }
 
-  return buffer.slice(buffer.length - maxBufferBytes);
+  let start = encoded.byteLength - maxBufferBytes;
+  while (start < encoded.length) {
+    const byte = encoded[start];
+    if (byte === undefined || (byte & 0b1100_0000) !== 0b1000_0000) {
+      break;
+    }
+    start += 1;
+  }
+
+  return textDecoder.decode(encoded.subarray(start));
 }
 
 function stateFromSnapshot(
@@ -116,6 +132,12 @@ function stateFromSnapshot(
 
 export function createTerminalSessionManager(config: TerminalSessionManagerConfig) {
   const maxBufferBytes = config.maxBufferBytes ?? DEFAULT_MAX_BUFFER_BYTES;
+  const closedSessionStates = new Map<string, TerminalSessionState>();
+
+  function clearKnownSessionAtomState(targetKey: string): void {
+    knownTerminalSessionKeys.delete(targetKey);
+    config.getRegistry().set(terminalSessionStateAtom(targetKey), EMPTY_TERMINAL_SESSION_STATE);
+  }
 
   function rememberTarget(target: TerminalSessionTarget): string | null {
     const targetKey = getTerminalSessionTargetKey(target);
@@ -123,6 +145,8 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     if (targetKey === null || knownTarget === null) {
       return null;
     }
+
+    closedSessionStates.delete(targetKey);
 
     const current = config.getRegistry().get(knownTerminalSessionsAtom);
     const existing = current[targetKey];
@@ -141,25 +165,45 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     return targetKey;
   }
 
-  function removeTargets(match: (target: KnownTerminalSessionTarget) => boolean): void {
+  function removeTargets(
+    match: (target: KnownTerminalSessionTarget) => boolean,
+  ): ReadonlyArray<string> {
     const current = config.getRegistry().get(knownTerminalSessionsAtom);
+    const removedKeys: string[] = [];
     const next = Object.fromEntries(
-      Object.entries(current).filter(([, target]) => !match(target)),
+      Object.entries(current).filter(([key, target]) => {
+        const shouldRemove = match(target);
+        if (shouldRemove) {
+          removedKeys.push(key);
+        }
+        return !shouldRemove;
+      }),
     ) as Record<string, KnownTerminalSessionTarget>;
     if (Object.keys(next).length === Object.keys(current).length) {
-      return;
+      return removedKeys;
     }
 
     config.getRegistry().set(knownTerminalSessionsAtom, next);
+    return removedKeys;
   }
 
   function getSnapshot(target: TerminalSessionTarget): TerminalSessionState {
-    const targetKey = rememberTarget(target);
+    const targetKey = getTerminalSessionTargetKey(target);
     if (targetKey === null) {
       return EMPTY_TERMINAL_SESSION_STATE;
     }
 
-    return config.getRegistry().get(terminalSessionStateAtom(targetKey));
+    const closedState = closedSessionStates.get(targetKey);
+    if (closedState) {
+      return closedState;
+    }
+
+    const rememberedTargetKey = rememberTarget(target);
+    if (rememberedTargetKey === null) {
+      return EMPTY_TERMINAL_SESSION_STATE;
+    }
+
+    return config.getRegistry().get(terminalSessionStateAtom(rememberedTargetKey));
   }
 
   function setState(targetKey: string, nextState: TerminalSessionState): void {
@@ -239,7 +283,7 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
         });
         return;
       case "closed":
-        setState(targetKey, {
+        closedSessionStates.set(targetKey, {
           ...current,
           snapshot: null,
           status: "closed",
@@ -248,6 +292,7 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
           updatedAt: event.createdAt,
           version: current.version + 1,
         });
+        clearKnownSessionAtomState(targetKey);
         removeTargets(
           (knownTarget) =>
             knownTarget.environmentId === target.environmentId &&
@@ -280,6 +325,7 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     if (target) {
       const targetKey = getTerminalSessionTargetKey(target);
       if (targetKey !== null) {
+        closedSessionStates.delete(targetKey);
         setState(targetKey, EMPTY_TERMINAL_SESSION_STATE);
       }
       return;
@@ -288,6 +334,9 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
     for (const key of knownTerminalSessionKeys) {
       setState(key, EMPTY_TERMINAL_SESSION_STATE);
     }
+    closedSessionStates.clear();
+    knownTerminalSessionKeys.clear();
+    config.getRegistry().set(knownTerminalSessionsAtom, {});
   }
 
   function invalidateEnvironment(environmentId: string): void {
@@ -297,12 +346,19 @@ export function createTerminalSessionManager(config: TerminalSessionManagerConfi
         setState(key, EMPTY_TERMINAL_SESSION_STATE);
       }
     }
-    removeTargets((target) => target.environmentId === environmentId);
+    for (const key of closedSessionStates.keys()) {
+      if (key.startsWith(prefix)) {
+        closedSessionStates.delete(key);
+      }
+    }
+    for (const key of removeTargets((target) => target.environmentId === environmentId)) {
+      closedSessionStates.delete(key);
+      clearKnownSessionAtomState(key);
+    }
   }
 
   function reset(): void {
     invalidate();
-    config.getRegistry().set(knownTerminalSessionsAtom, {});
   }
 
   function listSessions(
