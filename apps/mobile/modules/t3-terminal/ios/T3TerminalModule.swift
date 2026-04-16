@@ -17,6 +17,26 @@ public class T3TerminalModule: Module {
         view.fontSize = CGFloat(fontSize)
       }
 
+      Prop("appearanceScheme") { (view: T3TerminalView, appearanceScheme: String) in
+        view.appearanceScheme = appearanceScheme
+      }
+
+      Prop("themeConfig") { (view: T3TerminalView, themeConfig: String) in
+        view.themeConfig = themeConfig
+      }
+
+      Prop("backgroundColor") { (view: T3TerminalView, backgroundColor: String) in
+        view.backgroundColorHex = backgroundColor
+      }
+
+      Prop("foregroundColor") { (view: T3TerminalView, foregroundColor: String) in
+        view.foregroundColorHex = foregroundColor
+      }
+
+      Prop("mutedForegroundColor") { (view: T3TerminalView, mutedForegroundColor: String) in
+        view.mutedForegroundColorHex = mutedForegroundColor
+      }
+
       Events("onInput", "onResize")
     }
   }

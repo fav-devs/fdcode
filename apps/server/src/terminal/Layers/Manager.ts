@@ -1484,14 +1484,23 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
 
       yield* flushPersist(threadId, terminalId);
 
-      yield* modifyManagerState((state) => {
+      const removed = yield* modifyManagerState((state) => {
         if (!state.sessions.has(key)) {
-          return [undefined, state] as const;
+          return [false, state] as const;
         }
         const sessions = new Map(state.sessions);
         sessions.delete(key);
-        return [undefined, { ...state, sessions }] as const;
+        return [true, { ...state, sessions }] as const;
       });
+
+      if (removed) {
+        yield* publishEvent({
+          type: "closed",
+          threadId,
+          terminalId,
+          createdAt: new Date().toISOString(),
+        });
+      }
 
       if (deleteHistoryOnClose) {
         yield* deleteHistory(threadId, terminalId);
@@ -1683,8 +1692,9 @@ export const makeTerminalManagerWithOptions = Effect.fn("makeTerminalManagerWith
           const targetCols = input.cols ?? liveSession.cols;
           const targetRows = input.rows ?? liveSession.rows;
           const runtimeEnvChanged = !Equal.equals(currentRuntimeEnv, nextRuntimeEnv);
+          const hasLiveProcess = liveSession.process !== null && liveSession.status === "running";
 
-          if (liveSession.cwd !== input.cwd || runtimeEnvChanged) {
+          if (!hasLiveProcess && (liveSession.cwd !== input.cwd || runtimeEnvChanged)) {
             yield* stopProcess(liveSession);
             liveSession.cwd = input.cwd;
             liveSession.worktreePath = input.worktreePath ?? null;

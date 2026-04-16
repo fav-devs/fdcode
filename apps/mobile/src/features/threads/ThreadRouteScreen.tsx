@@ -3,6 +3,8 @@ import { useCallback, useMemo, useState } from "react";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { pipe } from "effect/Function";
+import type { ProjectScript } from "@t3tools/contracts";
+import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Pressable, ScrollView, Text as RNText, View, useColorScheme } from "react-native";
 import { useThemeColor } from "../../lib/useThemeColor";
 import { useGitStatus, gitStatusManager } from "../../state/use-git-status";
@@ -10,18 +12,25 @@ import { dismissGitActionResult, useGitActionProgress } from "../../state/use-gi
 
 import { EmptyState } from "../../components/EmptyState";
 import { LoadingScreen } from "../../components/LoadingScreen";
-import { buildThreadRoutePath } from "../../lib/routes";
+import { buildThreadRoutePath, buildThreadTerminalRoutePath } from "../../lib/routes";
 import { scopedThreadKey } from "../../lib/scopedEntities";
 import { connectionTone } from "../connection/connectionTone";
 
 import { useRemoteCatalog } from "../../state/use-remote-catalog";
 import {
+  getEnvironmentClient,
   useRemoteConnectionStatus,
   useRemoteEnvironmentState,
 } from "../../state/use-remote-environment-registry";
+import { terminalSessionManager, useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
+import {
+  buildTerminalMenuSessions,
+  nextTerminalId,
+  resolveProjectScriptTerminalId,
+} from "./terminalMenu";
 import { ThreadDetailScreen } from "./ThreadDetailScreen";
 import { ThreadGitControls } from "./ThreadGitControls";
 import { ThreadNavigationDrawer } from "./ThreadNavigationDrawer";
@@ -82,6 +91,18 @@ export function ThreadRouteScreen() {
     environmentId: selectedThread?.environmentId ?? "",
     cwd: selectedThread?.worktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
   });
+  const knownTerminalSessions = useKnownTerminalSessions({
+    environmentId: selectedThread?.environmentId ?? null,
+    threadId: selectedThread?.id ?? null,
+  });
+  const terminalMenuSessions = useMemo(
+    () =>
+      buildTerminalMenuSessions({
+        knownSessions: knownTerminalSessions,
+        workspaceRoot: selectedThreadProject?.workspaceRoot ?? null,
+      }),
+    [knownTerminalSessions, selectedThreadProject?.workspaceRoot],
+  );
 
   /* ─── Git action progress (for overlay banner) ──────────────────── */
   const gitActionProgressTarget = useMemo(
@@ -118,6 +139,73 @@ export function ThreadRouteScreen() {
   const handleOpenConnectionEditor = useCallback(() => {
     void router.push("/connections");
   }, [router]);
+
+  const handleOpenTerminal = useCallback(
+    (nextTerminalId?: string | null) => {
+      if (!selectedThread || !selectedThreadProject?.workspaceRoot) {
+        return;
+      }
+
+      void router.push(buildThreadTerminalRoutePath(selectedThread, nextTerminalId));
+    },
+    [router, selectedThread, selectedThreadProject?.workspaceRoot],
+  );
+
+  const handleOpenNewTerminal = useCallback(() => {
+    if (!selectedThread || !selectedThreadProject?.workspaceRoot) {
+      return;
+    }
+
+    const nextId = nextTerminalId(terminalMenuSessions.map((session) => session.terminalId));
+    void router.push(buildThreadTerminalRoutePath(selectedThread, nextId));
+  }, [router, selectedThread, selectedThreadProject?.workspaceRoot, terminalMenuSessions]);
+
+  const handleRunProjectScript = useCallback(
+    async (script: ProjectScript) => {
+      if (!selectedThread || !selectedThreadProject?.workspaceRoot) {
+        return;
+      }
+
+      const client = getEnvironmentClient(selectedThread.environmentId);
+      if (!client) {
+        return;
+      }
+
+      const targetTerminalId = resolveProjectScriptTerminalId({
+        existingTerminalIds: terminalMenuSessions.map((session) => session.terminalId),
+        hasRunningTerminal: terminalMenuSessions.some(
+          (session) => session.status === "running" || session.status === "starting",
+        ),
+      });
+      const cwd = projectScriptCwd({
+        project: { cwd: selectedThreadProject.workspaceRoot },
+        worktreePath: selectedThread.worktreePath ?? null,
+      });
+      const env = projectScriptRuntimeEnv({
+        project: { cwd: selectedThreadProject.workspaceRoot },
+        worktreePath: selectedThread.worktreePath ?? null,
+      });
+      const snapshot = await client.terminal.open({
+        threadId: selectedThread.id,
+        terminalId: targetTerminalId,
+        cwd,
+        worktreePath: selectedThread.worktreePath ?? null,
+        env,
+      });
+
+      terminalSessionManager.syncSnapshot(
+        { environmentId: selectedThread.environmentId },
+        snapshot,
+      );
+      await client.terminal.write({
+        threadId: selectedThread.id,
+        terminalId: targetTerminalId,
+        data: `${script.command}\r`,
+      });
+      void router.push(buildThreadTerminalRoutePath(selectedThread, targetTerminalId));
+    },
+    [router, selectedThread, selectedThreadProject, terminalMenuSessions],
+  );
 
   if (!environmentId || !threadId) {
     return <LoadingScreen message="Opening thread…" />;
@@ -223,6 +311,12 @@ export function ThreadRouteScreen() {
         currentBranch={selectedThreadDetail.branch}
         gitStatus={gitStatus.data}
         gitOperationLabel={gitState.gitOperationLabel}
+        canOpenTerminal={Boolean(selectedThreadProject?.workspaceRoot)}
+        projectScripts={selectedThreadProject?.scripts ?? []}
+        terminalSessions={terminalMenuSessions}
+        onOpenTerminal={handleOpenTerminal}
+        onOpenNewTerminal={handleOpenNewTerminal}
+        onRunProjectScript={handleRunProjectScript}
         onPull={gitActions.onPullSelectedThreadBranch}
         onRunAction={gitActions.onRunSelectedThreadGitAction}
       />

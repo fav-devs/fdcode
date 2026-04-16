@@ -4,6 +4,7 @@ import {
   EMPTY_TERMINAL_SESSION_ATOM,
   EMPTY_TERMINAL_SESSION_STATE,
   getTerminalSessionTargetKey,
+  knownTerminalSessionsAtom,
   terminalSessionStateAtom,
   type TerminalSessionState,
 } from "@t3tools/client-runtime";
@@ -40,4 +41,23 @@ export function useTerminalSessionTarget(input: {
     }),
     [input.environmentId, input.threadId, input.terminalId],
   );
+}
+
+export function useKnownTerminalSessions(input: {
+  readonly environmentId: string | null;
+  readonly threadId: string | null;
+}) {
+  const knownSessionsIndex = useAtomValue(knownTerminalSessionsAtom);
+
+  return useMemo(() => {
+    if (input.environmentId === null || input.threadId === null) {
+      return [];
+    }
+
+    void knownSessionsIndex;
+    return terminalSessionManager.listSessions({
+      environmentId: input.environmentId,
+      threadId: input.threadId,
+    });
+  }, [input.environmentId, input.threadId, knownSessionsIndex]);
 }

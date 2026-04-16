@@ -6,10 +6,8 @@ import { Pressable, View } from "react-native";
 import { AppText as Text } from "../../components/AppText";
 import { getEnvironmentClient } from "../../state/use-remote-environment-registry";
 import { useTerminalSession, useTerminalSessionTarget } from "../../state/use-terminal-session";
-import {
-  hasNativeTerminalSurface,
-  TerminalSurface,
-} from "../../native/terminal/NativeTerminalSurface";
+import { TerminalSurface } from "../../native/terminal/NativeTerminalSurface";
+import { hasNativeTerminalSurface } from "../../native/terminal/nativeTerminalModule";
 
 interface ThreadTerminalPanelProps {
   readonly environmentId: string;
@@ -26,6 +24,7 @@ const DEFAULT_TERMINAL_ROWS = 24;
 export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
   props: ThreadTerminalPanelProps,
 ) {
+  const nativeTerminalAvailable = hasNativeTerminalSurface();
   const terminalId = DEFAULT_TERMINAL_ID;
   const target = useTerminalSessionTarget({
     environmentId: props.environmentId,
@@ -141,7 +140,7 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
             Terminal
           </Text>
           <Text className="text-[11px] text-neutral-500" numberOfLines={1}>
-            {hasNativeTerminalSurface ? "Native Ghostty surface" : "Native surface pending link"}
+            {nativeTerminalAvailable ? "Native Ghostty surface" : "Text fallback active"}
           </Text>
         </View>
         <View className="flex-row items-center gap-2">
