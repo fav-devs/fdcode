@@ -82,6 +82,23 @@ describe("createTerminalSessionManager", () => {
     expect(manager.getSnapshot(TARGET).buffer).toBe("bcdef");
   });
 
+  it("caps retained output by utf-8 byte length", () => {
+    const manager = createTerminalSessionManager({
+      getRegistry: () => atomRegistry,
+      maxBufferBytes: 4,
+    });
+
+    manager.applyEvent(TARGET, {
+      type: "output",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      createdAt: "2026-04-01T00:00:01.000Z",
+      data: "🙂🙂",
+    });
+
+    expect(manager.getSnapshot(TARGET).buffer).toBe("🙂");
+  });
+
   it("invalidates one environment without clearing others", () => {
     const manager = createTerminalSessionManager({
       getRegistry: () => atomRegistry,
@@ -201,6 +218,38 @@ describe("createTerminalSessionManager", () => {
       status: "closed",
       snapshot: null,
       updatedAt: "2026-04-01T00:00:04.000Z",
+    });
+  });
+
+  it("clears locally retained closed state on reset", () => {
+    const manager = createTerminalSessionManager({
+      getRegistry: () => atomRegistry,
+    });
+
+    manager.applyEvent(TARGET, {
+      type: "started",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      createdAt: BASE_SNAPSHOT.updatedAt,
+      snapshot: BASE_SNAPSHOT,
+    });
+    manager.applyEvent(TARGET, {
+      type: "closed",
+      threadId: TARGET.threadId,
+      terminalId: TARGET.terminalId,
+      createdAt: "2026-04-01T00:00:04.000Z",
+    });
+
+    manager.reset();
+
+    expect(manager.getSnapshot(TARGET)).toEqual({
+      snapshot: null,
+      buffer: "",
+      status: "closed",
+      error: null,
+      hasRunningSubprocess: false,
+      updatedAt: null,
+      version: 0,
     });
   });
 
