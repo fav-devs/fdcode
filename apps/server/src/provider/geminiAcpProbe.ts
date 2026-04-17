@@ -14,6 +14,7 @@ import {
   geminiCapabilitiesForModel,
 } from "@t3tools/shared/model";
 import { Effect } from "effect";
+import { asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
 const GEMINI_ACP_PROBE_TIMEOUT_MS = 8_000;
 const GEMINI_ACP_AUTH_REQUIRED_CODE = -32_000;
@@ -33,25 +34,6 @@ export type GeminiCapabilityProbeResult = {
   readonly auth: Pick<ServerProviderAuth, "status">;
   readonly message?: string;
 };
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function trimToUndefined(value: unknown): string | undefined {
-  const candidate = asString(value)?.trim();
-  return candidate && candidate.length > 0 ? candidate : undefined;
-}
 
 function truncateLogLine(line: string): string {
   return line.length > MAX_CAPTURED_LOG_LENGTH

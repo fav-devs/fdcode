@@ -48,6 +48,7 @@ import {
   type ProviderAdapterError,
 } from "../Errors.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
+import { asArray, asNumber, asRecord, asString, trimToUndefined } from "../jsonValue.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 
@@ -168,29 +169,6 @@ interface GeminiSessionContext {
 export interface GeminiAdapterLiveOptions {
   readonly nativeEventLogPath?: string;
   readonly nativeEventLogger?: EventNdjsonLogger;
-}
-
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
-}
-
-function asArray(value: unknown): ReadonlyArray<unknown> | undefined {
-  return Array.isArray(value) ? value : undefined;
-}
-
-function trimToUndefined(value: unknown): string | undefined {
-  const candidate = asString(value)?.trim();
-  return candidate && candidate.length > 0 ? candidate : undefined;
 }
 
 function toMessage(cause: unknown, fallback: string): string {
