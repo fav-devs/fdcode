@@ -1,14 +1,15 @@
 import {
-  type ClaudeModelOptions,
-  type CodexModelOptions,
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
-  type GeminiModelOptions,
   type ModelSelection,
   type ProviderKind,
   type ProviderModelOptions,
   type ServerProvider,
 } from "@t3tools/contracts";
-import { normalizeModelSlug, resolveSelectableModel } from "@t3tools/shared/model";
+import {
+  createModelSelection,
+  normalizeModelSlug,
+  resolveSelectableModel,
+} from "@t3tools/shared/model";
 import { getComposerProviderState } from "./components/chat/composerProviderRegistry";
 import { UnifiedSettings } from "@t3tools/contracts/settings";
 import {
@@ -56,6 +57,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-gemini-model-id",
     example: "gemini-model-id-from-cli",
   },
+  opencode: {
+    provider: "opencode",
+    title: "OpenCode",
+    description: "Save additional OpenCode model slugs in `provider/model` format.",
+    placeholder: "openai/gpt-5",
+    example: "anthropic/claude-sonnet-4-5-20250929",
+  },
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
@@ -65,26 +73,7 @@ export function buildModelSelection(input: {
   model: string;
   options?: ProviderModelOptions[ProviderKind];
 }): ModelSelection {
-  switch (input.provider) {
-    case "codex":
-      return {
-        provider: "codex",
-        model: input.model,
-        ...(input.options ? { options: input.options as CodexModelOptions } : {}),
-      };
-    case "claudeAgent":
-      return {
-        provider: "claudeAgent",
-        model: input.model,
-        ...(input.options ? { options: input.options as ClaudeModelOptions } : {}),
-      };
-    case "gemini":
-      return {
-        provider: "gemini",
-        model: input.model,
-        ...(input.options ? { options: input.options as GeminiModelOptions } : {}),
-      };
-  }
+  return createModelSelection(input.provider, input.model, input.options);
 }
 
 export function normalizeCustomModelSlugs(
@@ -209,6 +198,12 @@ export function getCustomModelOptionsByProvider(
       "gemini",
       selectedProvider === "gemini" ? selectedModel : undefined,
     ),
+    opencode: getAppModelOptions(
+      settings,
+      providers,
+      "opencode",
+      selectedProvider === "opencode" ? selectedModel : undefined,
+    ),
   };
 }
 
@@ -236,9 +231,5 @@ export function resolveAppModelSelectionState(
     },
   });
 
-  return buildModelSelection({
-    provider,
-    model,
-    ...(modelOptionsForDispatch ? { options: modelOptionsForDispatch } : {}),
-  });
+  return createModelSelection(provider, model, modelOptionsForDispatch);
 }

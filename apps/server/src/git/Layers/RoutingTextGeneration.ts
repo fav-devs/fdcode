@@ -1,28 +1,20 @@
 /**
- * RoutingTextGeneration – Dispatches text generation requests to either the
- * Codex CLI or Claude CLI implementation based on the provider in each
- * request input.
- *
- * When `modelSelection.provider` is `"claudeAgent"` the request is forwarded to
- * the Claude layer; for any other value (including the default `undefined`) it
- * falls through to the Codex layer.
+ * RoutingTextGeneration – Dispatches text generation requests to provider-specific
+ * implementations based on the provider in each request input.
  *
  * @module RoutingTextGeneration
  */
-import { Effect, Layer, Context } from "effect";
+import { Context, Effect, Layer } from "effect";
 
 import {
   TextGeneration,
   type TextGenerationProvider,
   type TextGenerationShape,
 } from "../Services/TextGeneration.ts";
-import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { ClaudeTextGenerationLive } from "./ClaudeTextGeneration.ts";
+import { CodexTextGenerationLive } from "./CodexTextGeneration.ts";
 import { GeminiTextGenerationLive } from "./GeminiTextGeneration.ts";
-
-// ---------------------------------------------------------------------------
-// Internal service tags so both concrete layers can coexist.
-// ---------------------------------------------------------------------------
+import { OpenCodeTextGenerationLive } from "./OpenCodeTextGeneration.ts";
 
 class CodexTextGen extends Context.Service<CodexTextGen, TextGenerationShape>()(
   "t3/git/Layers/RoutingTextGeneration/CodexTextGen",
@@ -36,17 +28,24 @@ class GeminiTextGen extends Context.Service<GeminiTextGen, TextGenerationShape>(
   "t3/git/Layers/RoutingTextGeneration/GeminiTextGen",
 ) {}
 
-// ---------------------------------------------------------------------------
-// Routing implementation
-// ---------------------------------------------------------------------------
+class OpenCodeTextGen extends Context.Service<OpenCodeTextGen, TextGenerationShape>()(
+  "t3/git/Layers/RoutingTextGeneration/OpenCodeTextGen",
+) {}
 
 const makeRoutingTextGeneration = Effect.gen(function* () {
   const codex = yield* CodexTextGen;
   const claude = yield* ClaudeTextGen;
   const gemini = yield* GeminiTextGen;
+  const openCode = yield* OpenCodeTextGen;
 
   const route = (provider?: TextGenerationProvider): TextGenerationShape =>
-    provider === "claudeAgent" ? claude : provider === "gemini" ? gemini : codex;
+    provider === "claudeAgent"
+      ? claude
+      : provider === "gemini"
+        ? gemini
+        : provider === "opencode"
+          ? openCode
+          : codex;
 
   return {
     generateCommitMessage: (input) =>
@@ -81,6 +80,14 @@ const InternalGeminiLayer = Layer.effect(
   }),
 ).pipe(Layer.provide(GeminiTextGenerationLive));
 
+const InternalOpenCodeLayer = Layer.effect(
+  OpenCodeTextGen,
+  Effect.gen(function* () {
+    const svc = yield* TextGeneration;
+    return svc;
+  }),
+).pipe(Layer.provide(OpenCodeTextGenerationLive));
+
 export const RoutingTextGenerationLive = Layer.effect(
   TextGeneration,
   makeRoutingTextGeneration,
@@ -88,4 +95,5 @@ export const RoutingTextGenerationLive = Layer.effect(
   Layer.provide(InternalCodexLayer),
   Layer.provide(InternalClaudeLayer),
   Layer.provide(InternalGeminiLayer),
+  Layer.provide(InternalOpenCodeLayer),
 );

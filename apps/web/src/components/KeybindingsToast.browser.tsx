@@ -100,6 +100,13 @@ function createBaseServerConfig(): ServerConfig {
         codex: { enabled: true, binaryPath: "", homePath: "", customModels: [] },
         claudeAgent: { enabled: true, binaryPath: "", customModels: [], launchArgs: "" },
         gemini: { enabled: true, binaryPath: "", customModels: [] },
+        opencode: {
+          enabled: true,
+          binaryPath: "",
+          serverUrl: "",
+          serverPassword: "",
+          customModels: [],
+        },
       },
     },
   };

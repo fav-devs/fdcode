@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ServerProviderModel } from "@t3tools/contracts";
 import type { DraftId } from "../../composerDraftStore";
 import {
+  getComposerProviderControls,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
@@ -145,6 +146,29 @@ const GEMINI_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const OPENCODE_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "openai/gpt-5",
+    name: "GPT-5",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+      variantOptions: [
+        { value: "low", label: "Low" },
+        { value: "medium", label: "Medium", isDefault: true },
+      ],
+      agentOptions: [
+        { value: "build", label: "Build", isDefault: true },
+        { value: "plan", label: "Plan" },
+      ],
+    },
+  },
+];
+
 const EMPTY_CAPABILITIES = {
   reasoningEffortLevels: [],
   supportsFastMode: false,
@@ -152,7 +176,6 @@ const EMPTY_CAPABILITIES = {
   contextWindowOptions: [],
   promptInjectedEffortLevels: [],
 } as const;
-
 describe("getComposerProviderState", () => {
   it("returns codex defaults when no codex draft options exist", () => {
     const state = getComposerProviderState({
@@ -526,6 +549,50 @@ describe("getComposerProviderState", () => {
       modelOptionsForDispatch: {
         thinkingLevel: "HIGH",
       },
+    });
+  });
+
+  it("preserves OpenCode variant and agent options for dispatch", () => {
+    const state = getComposerProviderState({
+      provider: "opencode",
+      model: "openai/gpt-5",
+      models: OPENCODE_MODELS,
+      prompt: "",
+      modelOptions: {
+        opencode: {
+          variant: "medium",
+          agent: "plan",
+        },
+      },
+    });
+
+    expect(state).toEqual({
+      provider: "opencode",
+      promptEffort: "medium",
+      modelOptionsForDispatch: {
+        variant: "medium",
+        agent: "plan",
+      },
+    });
+  });
+});
+
+describe("getComposerProviderControls", () => {
+  it("hides the interaction mode toggle for OpenCode", () => {
+    expect(getComposerProviderControls("opencode")).toEqual({
+      showInteractionModeToggle: false,
+    });
+  });
+
+  it("keeps the interaction mode toggle for Codex, Claude, and Gemini", () => {
+    expect(getComposerProviderControls("codex")).toEqual({
+      showInteractionModeToggle: true,
+    });
+    expect(getComposerProviderControls("claudeAgent")).toEqual({
+      showInteractionModeToggle: true,
+    });
+    expect(getComposerProviderControls("gemini")).toEqual({
+      showInteractionModeToggle: true,
     });
   });
 });

@@ -7,33 +7,45 @@ import type { ProviderKind, ServerProvider } from "@t3tools/contracts";
 import { Effect, Equal, FileSystem, Layer, Path, PubSub, Ref, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
-import { ClaudeProviderLive } from "./ClaudeProvider.ts";
-import { CodexProviderLive } from "./CodexProvider.ts";
-import { GeminiProviderLive } from "./GeminiProvider.ts";
 import type { ClaudeProviderShape } from "../Services/ClaudeProvider.ts";
 import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
 import type { CodexProviderShape } from "../Services/CodexProvider.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
 import type { GeminiProviderShape } from "../Services/GeminiProvider.ts";
 import { GeminiProvider } from "../Services/GeminiProvider.ts";
+import type { OpenCodeProviderShape } from "../Services/OpenCodeProvider.ts";
+import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import {
   hydrateCachedProvider,
-  PROVIDER_CACHE_IDS,
   orderProviderSnapshots,
+  PROVIDER_CACHE_IDS,
   readProviderStatusCache,
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
 } from "../providerStatusCache.ts";
+import { ClaudeProviderLive } from "./ClaudeProvider.ts";
+import { CodexProviderLive } from "./CodexProvider.ts";
+import { GeminiProviderLive } from "./GeminiProvider.ts";
+import { OpenCodeProviderLive } from "./OpenCodeProvider.ts";
 
 const loadProviders = (
   codexProvider: CodexProviderShape,
   claudeProvider: ClaudeProviderShape,
   geminiProvider: GeminiProviderShape,
-): Effect.Effect<readonly [ServerProvider, ServerProvider, ServerProvider]> =>
-  Effect.all([codexProvider.getSnapshot, claudeProvider.getSnapshot, geminiProvider.getSnapshot], {
-    concurrency: "unbounded",
-  });
+  openCodeProvider: OpenCodeProviderShape,
+): Effect.Effect<readonly [ServerProvider, ServerProvider, ServerProvider, ServerProvider]> =>
+  Effect.all(
+    [
+      codexProvider.getSnapshot,
+      claudeProvider.getSnapshot,
+      geminiProvider.getSnapshot,
+      openCodeProvider.getSnapshot,
+    ],
+    {
+      concurrency: "unbounded",
+    },
+  );
 
 export const haveProvidersChanged = (
   previousProviders: ReadonlyArray<ServerProvider>,
@@ -46,6 +58,7 @@ export const ProviderRegistryLive = Layer.effect(
     const codexProvider = yield* CodexProvider;
     const claudeProvider = yield* ClaudeProvider;
     const geminiProvider = yield* GeminiProvider;
+    const openCodeProvider = yield* OpenCodeProvider;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
@@ -53,7 +66,12 @@ export const ProviderRegistryLive = Layer.effect(
       PubSub.unbounded<ReadonlyArray<ServerProvider>>(),
       PubSub.shutdown,
     );
-    const fallbackProviders = yield* loadProviders(codexProvider, claudeProvider, geminiProvider);
+    const fallbackProviders = yield* loadProviders(
+      codexProvider,
+      claudeProvider,
+      geminiProvider,
+      openCodeProvider,
+    );
     const cachePathByProvider = new Map(
       PROVIDER_CACHE_IDS.map(
         (provider) =>
@@ -165,6 +183,10 @@ export const ProviderRegistryLive = Layer.effect(
           return yield* geminiProvider.refresh.pipe(
             Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
           );
+        case "opencode":
+          return yield* openCodeProvider.refresh.pipe(
+            Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
+          );
         default:
           return yield* Effect.all(
             [
@@ -175,6 +197,9 @@ export const ProviderRegistryLive = Layer.effect(
                 Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
               ),
               geminiProvider.refresh.pipe(
+                Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
+              ),
+              openCodeProvider.refresh.pipe(
                 Effect.flatMap((nextProvider) => syncProvider(nextProvider)),
               ),
             ],
@@ -195,6 +220,9 @@ export const ProviderRegistryLive = Layer.effect(
     yield* Stream.runForEach(geminiProvider.streamChanges, (provider) =>
       syncProvider(provider),
     ).pipe(Effect.forkScoped);
+    yield* Stream.runForEach(openCodeProvider.streamChanges, (provider) =>
+      syncProvider(provider),
+    ).pipe(Effect.forkScoped);
 
     return {
       getProviders: Ref.get(providersRef),
@@ -212,4 +240,5 @@ export const ProviderRegistryLive = Layer.effect(
   Layer.provideMerge(CodexProviderLive),
   Layer.provideMerge(ClaudeProviderLive),
   Layer.provideMerge(GeminiProviderLive),
+  Layer.provideMerge(OpenCodeProviderLive),
 );

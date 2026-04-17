@@ -110,7 +110,7 @@ describe("serverSettings helpers", () => {
     });
   });
 
-  it("replaces text generation selection across providers without leaking prior options", () => {
+  it("replaces text generation selection across providers without leaking stale options", () => {
     const current = {
       ...DEFAULT_SERVER_SETTINGS,
       textGenerationModelSelection: {

@@ -27,7 +27,7 @@ import {
 import * as Schema from "effect/Schema";
 import * as Equal from "effect/Equal";
 import { DeepMutable } from "effect/Types";
-import { normalizeModelSlug } from "@t3tools/shared/model";
+import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { useMemo } from "react";
 import { getLocalStorageItem } from "./hooks/useLocalStorage";
 import { buildModelSelection, resolveAppModelSelection } from "./modelSelection";
@@ -529,7 +529,9 @@ function shouldRemoveDraft(draft: ComposerThreadDraftState): boolean {
 }
 
 function normalizeProviderKind(value: unknown): ProviderKind | null {
-  return value === "codex" || value === "claudeAgent" || value === "gemini" ? value : null;
+  return value === "codex" || value === "claudeAgent" || value === "gemini" || value === "opencode"
+    ? value
+    : null;
 }
 
 function normalizeProviderModelOptions(
@@ -549,6 +551,10 @@ function normalizeProviderModelOptions(
   const geminiCandidate =
     candidate?.gemini && typeof candidate.gemini === "object"
       ? (candidate.gemini as Record<string, unknown>)
+      : null;
+  const openCodeCandidate =
+    candidate?.opencode && typeof candidate.opencode === "object"
+      ? (candidate.opencode as Record<string, unknown>)
       : null;
 
   const codexReasoningEffort = Schema.is(CodexReasoningEffort)(codexCandidate?.reasoningEffort)
@@ -606,6 +612,21 @@ function normalizeProviderModelOptions(
           ...(claudeContextWindow !== undefined ? { contextWindow: claudeContextWindow } : {}),
         }
       : undefined;
+  const openCodeVariant =
+    typeof openCodeCandidate?.variant === "string" && openCodeCandidate.variant.length > 0
+      ? openCodeCandidate.variant
+      : undefined;
+  const openCodeAgent =
+    typeof openCodeCandidate?.agent === "string" && openCodeCandidate.agent.length > 0
+      ? openCodeCandidate.agent
+      : undefined;
+  const opencode =
+    openCodeVariant !== undefined || openCodeAgent !== undefined
+      ? {
+          ...(openCodeVariant !== undefined ? { variant: openCodeVariant } : {}),
+          ...(openCodeAgent !== undefined ? { agent: openCodeAgent } : {}),
+        }
+      : undefined;
 
   const geminiThinkingLevel: GeminiThinkingLevel | undefined =
     geminiCandidate?.thinkingLevel === "LOW" || geminiCandidate?.thinkingLevel === "HIGH"
@@ -624,14 +645,14 @@ function normalizeProviderModelOptions(
           ...(geminiThinkingBudget !== undefined ? { thinkingBudget: geminiThinkingBudget } : {}),
         }
       : undefined;
-
-  if (!codex && !claude && !gemini) {
+  if (!codex && !claude && !gemini && !opencode) {
     return null;
   }
   return {
     ...(codex ? { codex } : {}),
     ...(claude ? { claudeAgent: claude } : {}),
     ...(gemini ? { gemini } : {}),
+    ...(opencode ? { opencode } : {}),
   };
 }
 
@@ -663,11 +684,7 @@ function normalizeModelSelection(
     provider === "codex" ? legacy?.legacyCodex : undefined,
   );
   const options = modelOptions?.[provider];
-  return buildModelSelection({
-    provider,
-    model,
-    ...(options ? { options } : {}),
-  });
+  return createModelSelection(provider, model, options);
 }
 
 // ── Legacy sync helpers (used only during migration from v2 storage) ──
@@ -680,11 +697,7 @@ function legacySyncModelSelectionOptions(
     return null;
   }
   const options = modelOptions?.[modelSelection.provider];
-  return buildModelSelection({
-    provider: modelSelection.provider,
-    model: modelSelection.model,
-    ...(options ? { options } : {}),
-  });
+  return createModelSelection(modelSelection.provider, modelSelection.model, options);
 }
 
 function legacyMergeModelSelectionIntoProviderModelOptions(
@@ -728,17 +741,16 @@ function legacyToModelSelectionByProvider(
   const result: Partial<Record<ProviderKind, ModelSelection>> = {};
   // Add entries from the options bag (for non-active providers)
   if (modelOptions) {
-    for (const provider of ["codex", "claudeAgent", "gemini"] as const) {
+    for (const provider of ["codex", "claudeAgent", "gemini", "opencode"] as const) {
       const options = modelOptions[provider];
       if (options && Object.keys(options).length > 0) {
-        result[provider] = buildModelSelection({
+        result[provider] = createModelSelection(
           provider,
-          model:
-            modelSelection?.provider === provider
-              ? modelSelection.model
-              : DEFAULT_MODEL_BY_PROVIDER[provider],
+          modelSelection?.provider === provider
+            ? modelSelection.model
+            : DEFAULT_MODEL_BY_PROVIDER[provider],
           options,
-        });
+        );
       }
     }
   }
@@ -2230,11 +2242,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 nextMap[normalized.provider] = normalized;
               } else {
                 // No options in selection → preserve existing options, update provider+model
-                nextMap[normalized.provider] = buildModelSelection({
-                  provider: normalized.provider,
-                  model: normalized.model,
-                  ...(current?.options ? { options: current.options } : {}),
-                });
+                nextMap[normalized.provider] = createModelSelection(
+                  normalized.provider,
+                  normalized.model,
+                  current?.options,
+                );
               }
             }
             const nextActiveProvider = normalized?.provider ?? base.activeProvider;
@@ -2271,17 +2283,17 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             }
             const base = existing ?? createEmptyThreadDraft();
             const nextMap = { ...base.modelSelectionByProvider };
-            for (const provider of ["codex", "claudeAgent", "gemini"] as const) {
+            for (const provider of ["codex", "claudeAgent", "gemini", "opencode"] as const) {
               // Only touch providers explicitly present in the input
               if (!normalizedOpts || !(provider in normalizedOpts)) continue;
               const opts = normalizedOpts[provider];
               const current = nextMap[provider];
               if (opts) {
-                nextMap[provider] = buildModelSelection({
+                nextMap[provider] = createModelSelection(
                   provider,
-                  model: current?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider],
-                  options: opts,
-                });
+                  current?.model ?? DEFAULT_MODEL_BY_PROVIDER[provider],
+                  opts,
+                );
               } else if (current?.options) {
                 // Remove options but keep the selection
                 nextMap[provider] = buildModelSelection({
@@ -2330,11 +2342,11 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             const nextMap = { ...base.modelSelectionByProvider };
             const currentForProvider = nextMap[normalizedProvider];
             if (providerOpts) {
-              nextMap[normalizedProvider] = buildModelSelection({
-                provider: normalizedProvider,
-                model: currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
-                options: providerOpts,
-              });
+              nextMap[normalizedProvider] = createModelSelection(
+                normalizedProvider,
+                currentForProvider?.model ?? DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
+                providerOpts,
+              );
             } else if (currentForProvider?.options) {
               nextMap[normalizedProvider] = buildModelSelection({
                 provider: normalizedProvider,
@@ -2350,16 +2362,16 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               const stickyBase =
                 nextStickyMap[normalizedProvider] ??
                 base.modelSelectionByProvider[normalizedProvider] ??
-                buildModelSelection({
-                  provider: normalizedProvider,
-                  model: DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
-                });
+                createModelSelection(
+                  normalizedProvider,
+                  DEFAULT_MODEL_BY_PROVIDER[normalizedProvider],
+                );
               if (providerOpts) {
-                nextStickyMap[normalizedProvider] = buildModelSelection({
-                  provider: normalizedProvider,
-                  model: stickyBase.model,
-                  options: providerOpts,
-                });
+                nextStickyMap[normalizedProvider] = createModelSelection(
+                  normalizedProvider,
+                  stickyBase.model,
+                  providerOpts,
+                );
               } else if (stickyBase.options) {
                 nextStickyMap[normalizedProvider] = buildModelSelection({
                   provider: normalizedProvider,
