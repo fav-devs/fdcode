@@ -1,4 +1,11 @@
-import { ServerSettings, type ServerSettingsPatch } from "@t3tools/contracts";
+import {
+  type ClaudeModelOptions,
+  type CodexModelOptions,
+  type GeminiModelOptions,
+  type ModelSelection,
+  ServerSettings,
+  type ServerSettingsPatch,
+} from "@t3tools/contracts";
 import { Schema } from "effect";
 import { deepMerge } from "./Struct.ts";
 import { fromLenientJson } from "./schemaJson.ts";
@@ -63,10 +70,36 @@ export function applyServerSettingsPatch(
 
   return {
     ...next,
-    textGenerationModelSelection: {
-      provider: selectionPatch.provider ?? current.textGenerationModelSelection.provider,
-      model: selectionPatch.model ?? current.textGenerationModelSelection.model,
-      ...(selectionPatch.options ? { options: selectionPatch.options } : {}),
-    },
+    textGenerationModelSelection: (() => {
+      const provider = selectionPatch.provider ?? current.textGenerationModelSelection.provider;
+      const model = selectionPatch.model ?? current.textGenerationModelSelection.model;
+
+      switch (provider) {
+        case "codex":
+          return {
+            provider,
+            model,
+            ...(selectionPatch.options
+              ? { options: selectionPatch.options as CodexModelOptions }
+              : {}),
+          } satisfies ModelSelection;
+        case "claudeAgent":
+          return {
+            provider,
+            model,
+            ...(selectionPatch.options
+              ? { options: selectionPatch.options as ClaudeModelOptions }
+              : {}),
+          } satisfies ModelSelection;
+        case "gemini":
+          return {
+            provider,
+            model,
+            ...(selectionPatch.options
+              ? { options: selectionPatch.options as GeminiModelOptions }
+              : {}),
+          } satisfies ModelSelection;
+      }
+    })(),
   };
 }

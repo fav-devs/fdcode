@@ -10,22 +10,22 @@ import {
   parseGenericCliVersion,
   providerModelsFromSettings,
   spawnAndCollect,
-} from "../providerSnapshot";
+} from "../providerSnapshot.ts";
 import {
   DEFAULT_GEMINI_MODEL_CAPABILITIES,
   probeGeminiCapabilities,
   type GeminiCapabilityProbeResult,
-} from "../geminiAcpProbe";
-import { makeManagedServerProvider } from "../makeManagedServerProvider";
-import { GeminiProvider } from "../Services/GeminiProvider";
-import { ServerSettingsService } from "../../serverSettings";
+} from "../geminiAcpProbe.ts";
+import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
+import { GeminiProvider } from "../Services/GeminiProvider.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 import { ServerSettingsError } from "@t3tools/contracts";
 
 const PROVIDER = "gemini" as const;
 
 const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (args: ReadonlyArray<string>) {
-  const geminiSettings = yield* Effect.service(ServerSettingsService).pipe(
-    Effect.flatMap((service) => service.getSettings),
+  const serverSettings = yield* ServerSettingsService;
+  const geminiSettings = yield* serverSettings.getSettings.pipe(
     Effect.map((settings) => settings.providers.gemini),
   );
   const command = ChildProcess.make(geminiSettings.binaryPath, [...args], {
@@ -44,8 +44,8 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   ServerSettingsError,
   ChildProcessSpawner.ChildProcessSpawner | ServerSettingsService
 > {
-  const geminiSettings = yield* Effect.service(ServerSettingsService).pipe(
-    Effect.flatMap((service) => service.getSettings),
+  const serverSettings = yield* ServerSettingsService;
+  const geminiSettings = yield* serverSettings.getSettings.pipe(
     Effect.map((settings) => settings.providers.gemini),
   );
   const checkedAt = new Date().toISOString();
@@ -167,6 +167,46 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   });
 });
 
+const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvider => {
+  const checkedAt = new Date().toISOString();
+  const models = providerModelsFromSettings(
+    [],
+    PROVIDER,
+    geminiSettings.customModels,
+    DEFAULT_GEMINI_MODEL_CAPABILITIES,
+  );
+
+  if (!geminiSettings.enabled) {
+    return buildServerProvider({
+      provider: PROVIDER,
+      enabled: false,
+      checkedAt,
+      models,
+      probe: {
+        installed: false,
+        version: null,
+        status: "warning",
+        auth: { status: "unknown" },
+        message: "Gemini is disabled in T3 Code settings.",
+      },
+    });
+  }
+
+  return buildServerProvider({
+    provider: PROVIDER,
+    enabled: true,
+    checkedAt,
+    models,
+    probe: {
+      installed: false,
+      version: null,
+      status: "warning",
+      auth: { status: "unknown" },
+      message: "Gemini provider status has not been checked in this session yet.",
+    },
+  });
+};
+
 export const GeminiProviderLive = Layer.effect(
   GeminiProvider,
   Effect.gen(function* () {
@@ -186,6 +226,7 @@ export const GeminiProviderLive = Layer.effect(
         Stream.map((settings) => settings.providers.gemini),
       ),
       haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      initialSnapshot: makePendingGeminiProvider,
       checkProvider,
       refreshInterval: Duration.minutes(2),
     });

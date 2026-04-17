@@ -109,4 +109,36 @@ describe("serverSettings helpers", () => {
       },
     });
   });
+
+  it("replaces text generation selection across providers without leaking prior options", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      textGenerationModelSelection: {
+        provider: "codex" as const,
+        model: "gpt-5.4-mini",
+        options: {
+          reasoningEffort: "high" as const,
+          fastMode: true,
+        },
+      },
+    };
+
+    expect(
+      applyServerSettingsPatch(current, {
+        textGenerationModelSelection: {
+          provider: "gemini",
+          model: "gemini-2.5-flash",
+          options: {
+            thinkingBudget: 0,
+          },
+        },
+      }).textGenerationModelSelection,
+    ).toEqual({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      options: {
+        thinkingBudget: 0,
+      },
+    });
+  });
 });

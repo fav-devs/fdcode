@@ -2,7 +2,7 @@ import { describe, it, assert } from "@effect/vitest";
 import { Effect, Layer, Sink, Stream } from "effect";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { checkGeminiProviderStatus } from "./GeminiProvider";
+import { checkGeminiProviderStatus } from "./GeminiProvider.ts";
 import {
   DEFAULT_GEMINI_MODEL_CAPABILITIES,
   GEMINI_2_5_MODEL_CAPABILITIES,
@@ -10,8 +10,8 @@ import {
   geminiCapabilitiesForModel,
   parseGeminiAcpProbeError,
   parseGeminiDiscoveredModels,
-} from "../geminiAcpProbe";
-import { ServerSettingsService } from "../../serverSettings";
+} from "../geminiAcpProbe.ts";
+import { ServerSettingsService } from "../../serverSettings.ts";
 
 const encoder = new TextEncoder();
 
