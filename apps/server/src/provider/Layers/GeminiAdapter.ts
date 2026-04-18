@@ -78,6 +78,7 @@ import {
 } from "../acp/AcpRuntimeModel.ts";
 import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
 import { makeGeminiAcpRuntime } from "../acp/GeminiAcpSupport.ts";
+import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 import { asArray, asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
@@ -1537,6 +1538,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
           }
 
           const geminiSettings = yield* getGeminiSettings(input.threadId);
+          const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
           const cwd = path.resolve(input.cwd ?? process.cwd());
           const runtimeModeId = runtimeModeToGeminiModeId(input.runtimeMode);
           const selectedGeminiModel =
@@ -1557,7 +1559,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             runtimeMode: input.runtimeMode,
             runtimeModeId,
             cwd,
-            binaryPath: geminiSettings.binaryPath,
+            binaryPath,
             ...(launchConfig.env ? { env: launchConfig.env } : {}),
             turns: resumeTurns,
             ...(requestedResumeSessionId ? { resumeSessionId: requestedResumeSessionId } : {}),
@@ -1826,13 +1828,14 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             threadId,
             ...(context.session.model ? { selectedModel: context.session.model } : {}),
           });
+          const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
 
           const nextContext = yield* createGeminiSessionContext({
             threadId,
             runtimeMode: context.session.runtimeMode,
             runtimeModeId: context.runtimeModeId,
             cwd,
-            binaryPath: geminiSettings.binaryPath,
+            binaryPath,
             ...(launchConfig.env ? { env: launchConfig.env } : {}),
             turns: nextTurns,
             ...(resumeSessionId ? { resumeSessionId } : {}),
