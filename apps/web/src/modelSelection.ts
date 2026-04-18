@@ -17,6 +17,7 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "./providerModels";
+import { formatAppModelOptionName } from "./providerModelNames";
 
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
@@ -142,7 +143,7 @@ export function getAppModelOptions(
     seen.add(slug);
     options.push({
       slug,
-      name: slug,
+      name: formatAppModelOptionName(provider, slug),
       isCustom: true,
     });
   }
@@ -158,7 +159,7 @@ export function getAppModelOptions(
   ) {
     options.push({
       slug: normalizedSelectedModel,
-      name: normalizedSelectedModel,
+      name: formatAppModelOptionName(provider, normalizedSelectedModel),
       isCustom: true,
     });
   }

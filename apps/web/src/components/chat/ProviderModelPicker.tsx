@@ -19,6 +19,7 @@ import {
   MenuTrigger,
 } from "../ui/menu";
 import { ClaudeAI, CursorIcon, Gemini, Icon, OpenAI, OpenCodeIcon } from "../Icons";
+import { providerIconClassName } from "../providerBrandClassNames";
 import { cn } from "~/lib/utils";
 import { getProviderSnapshot } from "../../providerModels";
 
@@ -45,19 +46,6 @@ const COMING_SOON_PROVIDER_OPTIONS: ReadonlyArray<{
   label: string;
   icon: Icon;
 }> = [];
-
-function providerIconClassName(
-  provider: ProviderKind | ProviderPickerKind,
-  fallbackClassName: string,
-): string {
-  if (provider === "claudeAgent") {
-    return "text-[#d97757]";
-  }
-  if (provider === "gemini") {
-    return "text-[#4f8df7]";
-  }
-  return fallbackClassName;
-}
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   provider: ProviderKind;

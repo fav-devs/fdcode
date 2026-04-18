@@ -36,6 +36,9 @@ export interface ThreadStatusPill {
   colorClass: string;
   dotClass: string;
   pulse: boolean;
+  workingProvider?: string;
+  dismissible?: boolean;
+  dismissalKey?: string;
 }
 
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
@@ -55,9 +58,32 @@ type ThreadStatusInput = Pick<
   | "interactionMode"
   | "latestTurn"
   | "session"
+  | "updatedAt"
 > & {
   lastVisitedAt?: string | undefined;
+  dismissedStatusKey?: string | undefined;
 };
+
+function createThreadStatusDismissalKey(
+  label: Extract<ThreadStatusPill["label"], "Pending Approval" | "Awaiting Input" | "Plan Ready">,
+  thread: ThreadStatusInput,
+): string {
+  return [
+    label,
+    thread.updatedAt ?? "",
+    thread.latestTurn?.turnId ?? "",
+    thread.latestTurn?.completedAt ?? "",
+    thread.session?.updatedAt ?? "",
+  ].join(":");
+}
+
+function createCompletedDismissalKey(thread: ThreadStatusInput): string | null {
+  if (!thread.latestTurn?.completedAt) {
+    return null;
+  }
+
+  return ["Completed", thread.latestTurn.turnId, thread.latestTurn.completedAt].join(":");
+}
 
 export interface ThreadJumpHintVisibilityController {
   sync: (shouldShow: boolean) => void;
@@ -330,22 +356,35 @@ export function resolveThreadStatusPill(input: {
   thread: ThreadStatusInput;
 }): ThreadStatusPill | null {
   const { thread } = input;
+  const workingProvider = thread.session?.providerName ?? thread.session?.provider;
 
   if (thread.hasPendingApprovals) {
+    const dismissalKey = createThreadStatusDismissalKey("Pending Approval", thread);
+    if (thread.dismissedStatusKey === dismissalKey) {
+      return null;
+    }
     return {
       label: "Pending Approval",
       colorClass: "text-amber-600 dark:text-amber-300/90",
       dotClass: "bg-amber-500 dark:bg-amber-300/90",
       pulse: false,
+      dismissible: true,
+      dismissalKey,
     };
   }
 
   if (thread.hasPendingUserInput) {
+    const dismissalKey = createThreadStatusDismissalKey("Awaiting Input", thread);
+    if (thread.dismissedStatusKey === dismissalKey) {
+      return null;
+    }
     return {
       label: "Awaiting Input",
       colorClass: "text-indigo-600 dark:text-indigo-300/90",
       dotClass: "bg-indigo-500 dark:bg-indigo-300/90",
       pulse: false,
+      dismissible: true,
+      dismissalKey,
     };
   }
 
@@ -355,6 +394,8 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
+      ...(workingProvider ? { workingProvider } : {}),
+      dismissible: false,
     };
   }
 
@@ -364,6 +405,8 @@ export function resolveThreadStatusPill(input: {
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
+      ...(workingProvider ? { workingProvider } : {}),
+      dismissible: false,
     };
   }
 
@@ -373,20 +416,33 @@ export function resolveThreadStatusPill(input: {
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
     thread.hasActionableProposedPlan;
   if (hasPlanReadyPrompt) {
+    const dismissalKey = createThreadStatusDismissalKey("Plan Ready", thread);
+    if (thread.dismissedStatusKey === dismissalKey) {
+      return null;
+    }
     return {
       label: "Plan Ready",
       colorClass: "text-violet-600 dark:text-violet-300/90",
       dotClass: "bg-violet-500 dark:bg-violet-300/90",
       pulse: false,
+      dismissible: true,
+      dismissalKey,
     };
   }
 
   if (hasUnseenCompletion(thread)) {
+    const dismissalKey = createCompletedDismissalKey(thread);
+    if (dismissalKey && thread.dismissedStatusKey === dismissalKey) {
+      return null;
+    }
     return {
       label: "Completed",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,
+      ...(workingProvider ? { workingProvider } : {}),
+      dismissible: true,
+      ...(dismissalKey ? { dismissalKey } : {}),
     };
   }
 

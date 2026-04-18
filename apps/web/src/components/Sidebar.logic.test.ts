@@ -437,6 +437,8 @@ describe("resolveThreadStatusPill", () => {
     interactionMode: "plan" as const,
     latestTurn: null,
     lastVisitedAt: undefined,
+    dismissedStatusKey: undefined,
+    updatedAt: "2026-03-09T10:05:00.000Z",
     session: {
       provider: "codex" as const,
       status: "running" as const,
@@ -475,6 +477,39 @@ describe("resolveThreadStatusPill", () => {
         thread: baseThread,
       }),
     ).toMatchObject({ label: "Working", pulse: true });
+  });
+
+  it("preserves raw cursor provider names for active sessions", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          session: {
+            ...baseThread.session,
+            providerName: "cursorCli",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Working", workingProvider: "cursorCli", pulse: true });
+  });
+
+  it("preserves raw opencode provider names for unseen completions", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          interactionMode: "default",
+          latestTurn: makeLatestTurn(),
+          lastVisitedAt: "2026-03-09T10:04:00.000Z",
+          session: {
+            ...baseThread.session,
+            providerName: "opencode",
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toMatchObject({ label: "Completed", workingProvider: "opencode", pulse: false });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -526,6 +561,25 @@ describe("resolveThreadStatusPill", () => {
         },
       }),
     ).toMatchObject({ label: "Completed", pulse: false });
+  });
+
+  it("hides a dismissible status when its dismissal key matches", () => {
+    expect(
+      resolveThreadStatusPill({
+        thread: {
+          ...baseThread,
+          hasActionableProposedPlan: true,
+          latestTurn: makeLatestTurn(),
+          dismissedStatusKey:
+            "Plan Ready:2026-03-09T10:05:00.000Z:turn-1:2026-03-09T10:05:00.000Z:2026-03-09T10:00:00.000Z",
+          session: {
+            ...baseThread.session,
+            status: "ready",
+            orchestrationStatus: "ready",
+          },
+        },
+      }),
+    ).toBeNull();
   });
 });
 

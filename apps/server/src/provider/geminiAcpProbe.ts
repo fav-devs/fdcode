@@ -1,6 +1,3 @@
-import { spawn } from "node:child_process";
-import * as readline from "node:readline";
-
 import type {
   ModelCapabilities,
   ServerProviderAuth,
@@ -13,13 +10,15 @@ import {
   GEMINI_3_MODEL_CAPABILITIES,
   geminiCapabilitiesForModel,
 } from "@t3tools/shared/model";
-import { Effect } from "effect";
+import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
+import { Cause, Effect, Option } from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+
+import { makeGeminiAcpRuntime } from "./acp/GeminiAcpSupport.ts";
 import { asNumber, asRecord, trimToUndefined } from "./jsonValue.ts";
 
 const GEMINI_ACP_PROBE_TIMEOUT_MS = 8_000;
 const GEMINI_ACP_AUTH_REQUIRED_CODE = -32_000;
-const MAX_CAPTURED_LOG_LINES = 5;
-const MAX_CAPTURED_LOG_LENGTH = 240;
 
 export {
   DEFAULT_GEMINI_MODEL_CAPABILITIES,
@@ -35,37 +34,12 @@ export type GeminiCapabilityProbeResult = {
   readonly message?: string;
 };
 
-function truncateLogLine(line: string): string {
-  return line.length > MAX_CAPTURED_LOG_LENGTH
-    ? `${line.slice(0, MAX_CAPTURED_LOG_LENGTH - 3)}...`
-    : line;
-}
-
-function pushLogLine(target: string[], line: string): void {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith("{")) {
-    return;
-  }
-
-  target.push(truncateLogLine(trimmed));
-  if (target.length > MAX_CAPTURED_LOG_LINES) {
-    target.shift();
-  }
-}
-
 function formatGeminiDiscoveryWarning(detail: string): string {
   return `Gemini CLI is installed, but T3 Code could not verify authentication or discover models. ${detail}`;
 }
 
 function formatGeminiAuthMessage(detail: string): string {
   return `Gemini is not authenticated. ${detail}`;
-}
-
-function detailFromProbeLogs(
-  stdoutLines: ReadonlyArray<string>,
-  stderrLines: ReadonlyArray<string>,
-) {
-  return stderrLines[stderrLines.length - 1] ?? stdoutLines[stdoutLines.length - 1];
 }
 
 export function parseGeminiAcpProbeError(
@@ -117,9 +91,13 @@ export function parseGeminiDiscoveredModels(
     }
 
     seen.add(slug);
+    const explicitName = trimToUndefined(record?.name);
     discoveredModels.push({
       slug,
-      name: trimToUndefined(record?.name) ?? slug,
+      name:
+        explicitName && explicitName.toLowerCase() !== slug.toLowerCase()
+          ? explicitName
+          : formatGeminiModelDisplayName(slug),
       isCustom: false,
       capabilities: geminiCapabilitiesForModel(slug, fallbackCapabilities),
     });
@@ -132,256 +110,61 @@ export const probeGeminiCapabilities = (input: {
   readonly binaryPath: string;
   readonly cwd: string;
   readonly capabilities?: ModelCapabilities;
-}) =>
-  Effect.tryPromise(
-    () =>
-      new Promise<GeminiCapabilityProbeResult>((resolve) => {
-        const child = spawn(input.binaryPath, ["--acp"], {
-          cwd: input.cwd,
-          shell: process.platform === "win32",
-          stdio: ["pipe", "pipe", "pipe"],
-        });
+}): Effect.Effect<GeminiCapabilityProbeResult, never, ChildProcessSpawner.ChildProcessSpawner> =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const runtime = yield* makeGeminiAcpRuntime({
+        childProcessSpawner,
+        binaryPath: input.binaryPath,
+        cwd: input.cwd,
+        clientInfo: { name: "t3-code-provider-probe", version: "0.0.0" },
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false,
+          auth: { terminal: false },
+        },
+      });
 
-        if (!child.stdin || !child.stdout || !child.stderr) {
-          child.kill();
-          resolve({
-            status: "warning",
-            auth: { status: "unknown" },
-            models: [],
-            message: formatGeminiDiscoveryWarning(
-              "Gemini ACP did not expose the expected stdio streams.",
-            ),
-          });
-          return;
-        }
+      const started = yield* runtime
+        .start()
+        .pipe(Effect.timeoutOption(GEMINI_ACP_PROBE_TIMEOUT_MS));
+      if (Option.isNone(started)) {
+        return {
+          status: "warning" as const,
+          auth: { status: "unknown" as const },
+          models: [],
+          message: formatGeminiDiscoveryWarning("Timed out while starting Gemini ACP session."),
+        } satisfies GeminiCapabilityProbeResult;
+      }
 
-        const stdoutLines: string[] = [];
-        const stderrLines: string[] = [];
-        const stdoutReader = readline.createInterface({ input: child.stdout });
-        const stderrReader = readline.createInterface({ input: child.stderr });
+      const models = parseGeminiDiscoveredModels(
+        started.value.sessionSetupResult,
+        input.capabilities ?? DEFAULT_GEMINI_MODEL_CAPABILITIES,
+      );
+      if (models.length === 0) {
+        return {
+          status: "warning" as const,
+          auth: { status: "authenticated" as const },
+          models: [],
+          message: formatGeminiDiscoveryWarning(
+            "Gemini ACP session started, but it did not report any available models.",
+          ),
+        } satisfies GeminiCapabilityProbeResult;
+      }
 
-        let settled = false;
-        let sessionNewRequested = false;
-        let timeout: ReturnType<typeof setTimeout> | undefined;
-
-        const cleanup = () => {
-          if (timeout) {
-            clearTimeout(timeout);
-          }
-          stdoutReader.removeAllListeners();
-          stderrReader.removeAllListeners();
-          child.removeAllListeners();
-          stdoutReader.close();
-          stderrReader.close();
-        };
-
-        const terminate = (gracefulClosePayload?: string) => {
-          if (gracefulClosePayload && child.stdin.writable) {
-            child.stdin.write(gracefulClosePayload);
-            child.stdin.end();
-            const delayedKill = setTimeout(() => {
-              if (!child.killed) {
-                child.kill();
-              }
-            }, 150);
-            delayedKill.unref?.();
-            return;
-          }
-
-          if (child.stdin.writable) {
-            child.stdin.end();
-          }
-          if (!child.killed) {
-            child.kill();
-          }
-        };
-
-        const finalize = (
-          result: GeminiCapabilityProbeResult,
-          options?: { readonly sessionId?: string },
-        ) => {
-          if (settled) {
-            return;
-          }
-
-          settled = true;
-          cleanup();
-          const closePayload =
-            options?.sessionId && options.sessionId.length > 0
-              ? `${JSON.stringify({
-                  jsonrpc: "2.0",
-                  id: 3,
-                  method: "session/close",
-                  params: { sessionId: options.sessionId },
-                })}\n`
-              : undefined;
-          terminate(closePayload);
-          resolve(result);
-        };
-
-        const sendRequest = (id: number, method: string, params: Record<string, unknown>) => {
-          if (!child.stdin.writable) {
-            finalize({
-              status: "warning",
-              auth: { status: "unknown" },
-              models: [],
-              message: formatGeminiDiscoveryWarning("Gemini ACP stdin is not writable."),
-            });
-            return;
-          }
-
-          child.stdin.write(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id,
-              method,
-              params,
-            })}\n`,
-          );
-        };
-
-        timeout = setTimeout(() => {
-          const detail = detailFromProbeLogs(stdoutLines, stderrLines);
-          finalize({
-            status: "warning",
-            auth: { status: "unknown" },
-            models: [],
-            message: formatGeminiDiscoveryWarning(
-              detail
-                ? `Timed out while starting Gemini ACP session. Last output: ${detail}`
-                : "Timed out while starting Gemini ACP session.",
-            ),
-          });
-        }, GEMINI_ACP_PROBE_TIMEOUT_MS);
-
-        stdoutReader.on("line", (line) => {
-          pushLogLine(stdoutLines, line);
-
-          const trimmed = line.trim();
-          if (!trimmed.startsWith("{")) {
-            return;
-          }
-
-          let parsed: Record<string, unknown> | undefined;
-          try {
-            parsed = asRecord(JSON.parse(trimmed));
-          } catch {
-            return;
-          }
-
-          if (!parsed) {
-            return;
-          }
-
-          const id = asNumber(parsed.id);
-          if (id === 1) {
-            const error = asRecord(parsed.error);
-            if (error) {
-              finalize({
-                ...parseGeminiAcpProbeError(error),
-                models: [],
-              });
-              return;
-            }
-
-            if (!sessionNewRequested) {
-              sessionNewRequested = true;
-              sendRequest(2, "session/new", {
-                cwd: input.cwd,
-                mcpServers: [],
-              });
-            }
-            return;
-          }
-
-          if (id !== 2) {
-            return;
-          }
-
-          const error = asRecord(parsed.error);
-          if (error) {
-            finalize({
-              ...parseGeminiAcpProbeError(error),
-              models: [],
-            });
-            return;
-          }
-
-          const result = parsed.result;
-          const models = parseGeminiDiscoveredModels(
-            result,
-            input.capabilities ?? DEFAULT_GEMINI_MODEL_CAPABILITIES,
-          );
-          if (models.length === 0) {
-            finalize({
-              status: "warning",
-              auth: { status: "authenticated" },
-              models: [],
-              message: formatGeminiDiscoveryWarning(
-                "Gemini ACP session started, but it did not report any available models.",
-              ),
-            });
-            return;
-          }
-
-          finalize(
-            {
-              status: "ready",
-              auth: { status: "authenticated" },
-              models,
-              message: "Gemini CLI is installed and authenticated.",
-            },
-            (() => {
-              const sessionId = trimToUndefined(asRecord(result)?.sessionId);
-              return sessionId ? { sessionId } : undefined;
-            })(),
-          );
-        });
-
-        stderrReader.on("line", (line) => {
-          pushLogLine(stderrLines, line);
-        });
-
-        child.once("error", (error) => {
-          finalize({
-            status: "warning",
-            auth: { status: "unknown" },
-            models: [],
-            message: formatGeminiDiscoveryWarning(
-              error.message.length > 0 ? error.message : "Failed to start Gemini ACP session.",
-            ),
-          });
-        });
-
-        child.once("exit", (code, signal) => {
-          if (settled) {
-            return;
-          }
-
-          const detail = detailFromProbeLogs(stdoutLines, stderrLines);
-          const exitMessage =
-            detail ??
-            `Gemini ACP exited before responding (code ${code ?? "null"}${signal ? `, signal ${signal}` : ""}).`;
-          finalize({
-            status: "warning",
-            auth: { status: "unknown" },
-            models: [],
-            message: formatGeminiDiscoveryWarning(exitMessage),
-          });
-        });
-
-        sendRequest(1, "initialize", {
-          protocolVersion: 1,
-          clientInfo: {
-            name: "t3code",
-            title: "T3 Code",
-            version: "0.1.0",
-          },
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-            auth: { terminal: false },
-          },
-        });
+      return {
+        status: "ready" as const,
+        auth: { status: "authenticated" as const },
+        models,
+        message: "Gemini CLI is installed and authenticated.",
+      } satisfies GeminiCapabilityProbeResult;
+    }),
+  ).pipe(
+    Effect.catchCause((cause) =>
+      Effect.succeed({
+        ...parseGeminiAcpProbeError(Cause.squash(cause)),
+        models: [],
       }),
+    ),
   );

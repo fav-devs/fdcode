@@ -6,20 +6,17 @@
  *
  * @module GeminiAdapterLive
  */
-import { type ChildProcessWithoutNullStreams, spawn, spawnSync } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import readline from "node:readline";
 
 import {
   ApprovalRequestId,
   type CanonicalItemType,
-  type CanonicalRequestType,
   EventId,
   type GeminiThinkingBudget,
   type GeminiThinkingLevel,
-  ProviderItemId,
+  type ProviderApprovalDecision,
   type ProviderRuntimeEvent,
   type ProviderSendTurnInput,
   type ProviderSession,
@@ -30,11 +27,28 @@ import {
   TurnId,
 } from "@t3tools/contracts";
 import {
+  geminiCapabilitiesForModel,
   getGeminiThinkingConfigKind,
   getGeminiThinkingModelAlias,
+  hasEffortLevel,
   resolveApiModelId,
 } from "@t3tools/shared/model";
-import { Effect, FileSystem, Layer, Queue, Stream } from "effect";
+import {
+  Deferred,
+  Effect,
+  Exit,
+  Fiber,
+  FileSystem,
+  Layer,
+  Option,
+  Queue,
+  Scope,
+  Semaphore,
+  Stream,
+  SynchronizedRef,
+} from "effect";
+import { ChildProcessSpawner } from "effect/unstable/process";
+import type * as EffectAcpSchema from "effect-acp/schema";
 
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
@@ -47,10 +61,27 @@ import {
   ProviderAdapterValidationError,
   type ProviderAdapterError,
 } from "../Errors.ts";
+import { mapAcpToAdapterError } from "../acp/AcpAdapterSupport.ts";
+import {
+  makeAcpAssistantItemEvent,
+  makeAcpContentDeltaEvent,
+  makeAcpPlanUpdatedEvent,
+  makeAcpRequestOpenedEvent,
+  makeAcpRequestResolvedEvent,
+  makeAcpToolCallEvent,
+} from "../acp/AcpCoreRuntimeEvents.ts";
+import { makeAcpNativeLoggers } from "../acp/AcpNativeLogging.ts";
+import {
+  type AcpParsedSessionEvent,
+  type AcpPermissionRequest,
+  parsePermissionRequest,
+} from "../acp/AcpRuntimeModel.ts";
+import { type AcpSessionRuntimeShape } from "../acp/AcpSessionRuntime.ts";
+import { makeGeminiAcpRuntime } from "../acp/GeminiAcpSupport.ts";
 import { GeminiAdapter, type GeminiAdapterShape } from "../Services/GeminiAdapter.ts";
-import { asArray, asNumber, asRecord, asString, trimToUndefined } from "../jsonValue.ts";
-import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
+import { asArray, asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
+import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "gemini" as const;
 const GEMINI_ACP_REQUEST_TIMEOUT_MS = 60_000;
@@ -62,57 +93,8 @@ const T3CODE_GEMINI_SETTINGS_DIR = path.join(os.tmpdir(), "t3code", "gemini");
 const GEMINI_3_THINKING_LEVELS: ReadonlyArray<GeminiThinkingLevel> = ["HIGH", "LOW"];
 const GEMINI_2_5_THINKING_BUDGETS: ReadonlyArray<GeminiThinkingBudget> = [-1, 512, 0];
 
-type JsonRpcId = number | string;
-type GeminiToolKind =
-  | "read"
-  | "edit"
-  | "delete"
-  | "move"
-  | "search"
-  | "execute"
-  | "think"
-  | "fetch"
-  | "switch_mode"
-  | "other";
-type GeminiToolStatus = "pending" | "in_progress" | "completed" | "failed";
-type GeminiPermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
-
-interface GeminiPermissionOption {
-  readonly optionId: string;
-  readonly name: string;
-  readonly kind: GeminiPermissionOptionKind;
-}
-
-interface GeminiToolCallLocation {
-  readonly path: string;
-  readonly line?: number | null;
-}
-
-interface GeminiToolCall {
-  readonly toolCallId: string;
-  readonly title?: string | null;
-  readonly kind?: GeminiToolKind | null;
-  readonly status?: GeminiToolStatus | null;
-  readonly content?: ReadonlyArray<unknown> | null;
-  readonly locations?: ReadonlyArray<GeminiToolCallLocation> | null;
-  readonly rawInput?: unknown;
-  readonly rawOutput?: unknown;
-}
-
-interface GeminiPendingRequest {
-  readonly method: string;
-  readonly timeout: ReturnType<typeof setTimeout>;
-  readonly resolve: (value: unknown) => void;
-  readonly reject: (error: ProviderAdapterRequestError) => void;
-}
-
 interface GeminiPendingApproval {
-  readonly acpRequestId: JsonRpcId;
-  readonly options: ReadonlyArray<GeminiPermissionOption>;
-  readonly requestType: CanonicalRequestType;
-  readonly turnId?: TurnId;
-  readonly providerItemId?: string;
-  readonly detail?: string;
+  readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
 }
 
 interface GeminiRecordedItem {
@@ -127,14 +109,9 @@ interface GeminiRecordedItem {
 
 interface GeminiTurnState {
   readonly turnId: TurnId;
-  readonly startedAt: string;
-  readonly assistantItemId: RuntimeItemId;
   reasoningItemId: RuntimeItemId | undefined;
   readonly items: GeminiRecordedItem[];
-  assistantTextStarted: boolean;
   reasoningTextStarted: boolean;
-  assistantText: string;
-  reasoningText: string;
 }
 
 interface GeminiStoredTurn {
@@ -145,24 +122,21 @@ interface GeminiStoredTurn {
 }
 
 interface GeminiSessionContext {
+  readonly threadId: ThreadId;
   session: ProviderSession;
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly stdout: readline.Interface;
-  readonly stderr: readline.Interface;
-  readonly pending: Map<string, GeminiPendingRequest>;
+  readonly scope: Scope.Closeable;
+  readonly acp: AcpSessionRuntimeShape;
+  notificationFiber: Fiber.Fiber<void, never> | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, GeminiPendingApproval>;
   readonly turns: GeminiStoredTurn[];
   readonly runtimeModeId: string;
-  nextRequestId: number;
-  sessionId: string;
+  readonly sessionId: string;
   currentModeId: string | undefined;
   currentModelId: string | undefined;
   turnState: GeminiTurnState | undefined;
   sessionFilePath: string | undefined;
   systemSettingsPath: string | undefined;
-  suppressSessionUpdates: boolean;
   stopped: boolean;
-  exitEmitted: boolean;
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined;
 }
 
@@ -178,6 +152,18 @@ function toMessage(cause: unknown, fallback: string): string {
   return fallback;
 }
 
+function toSpawnEnv(
+  env: NodeJS.ProcessEnv | Readonly<Record<string, string>> | undefined,
+): Readonly<Record<string, string>> | undefined {
+  if (!env) {
+    return undefined;
+  }
+  const entries = Object.entries(env).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
 export function buildGeminiThinkingModelConfigAliases(
   modelIds: ReadonlyArray<string>,
 ): Record<string, Record<string, unknown>> {
@@ -190,10 +176,14 @@ export function buildGeminiThinkingModelConfigAliases(
       continue;
     }
     seen.add(model);
+    const caps = geminiCapabilitiesForModel(model);
 
     switch (getGeminiThinkingConfigKind(model)) {
       case "level": {
         for (const thinkingLevel of GEMINI_3_THINKING_LEVELS) {
+          if (!hasEffortLevel(caps, thinkingLevel)) {
+            continue;
+          }
           const alias = getGeminiThinkingModelAlias(model, { thinkingLevel });
           if (!alias) {
             continue;
@@ -214,6 +204,9 @@ export function buildGeminiThinkingModelConfigAliases(
       }
       case "budget": {
         for (const thinkingBudget of GEMINI_2_5_THINKING_BUDGETS) {
+          if (!hasEffortLevel(caps, String(thinkingBudget))) {
+            continue;
+          }
           const alias = getGeminiThinkingModelAlias(model, { thinkingBudget });
           if (!alias) {
             continue;
@@ -425,7 +418,7 @@ function runtimeModeToGeminiModeId(runtimeMode: ProviderSession["runtimeMode"]):
   }
 }
 
-function itemTypeFromToolKind(kind: GeminiToolKind | undefined): CanonicalItemType {
+function itemTypeFromAcpToolKind(kind: string | undefined): CanonicalItemType {
   switch (kind) {
     case "execute":
       return "command_execution";
@@ -434,103 +427,72 @@ function itemTypeFromToolKind(kind: GeminiToolKind | undefined): CanonicalItemTy
     case "move":
       return "file_change";
     case "search":
+    case "fetch":
       return "web_search";
-    case "read":
-    case "think":
-    case "fetch":
-    case "switch_mode":
-    case "other":
     default:
       return "dynamic_tool_call";
   }
 }
 
-function requestTypeFromToolKind(kind: GeminiToolKind | undefined): CanonicalRequestType {
-  switch (kind) {
-    case "execute":
-      return "command_execution_approval";
-    case "edit":
-    case "delete":
-    case "move":
-      return "file_change_approval";
-    case "read":
-      return "file_read_approval";
-    case "search":
-    case "think":
-    case "fetch":
-    case "switch_mode":
-    case "other":
-    default:
-      return "dynamic_tool_call";
-  }
-}
-
-function statusFromToolStatus(
-  status: GeminiToolStatus | undefined | null,
+function runtimeStatusFromAcpToolStatus(
+  status: "pending" | "inProgress" | "completed" | "failed" | undefined,
 ): "inProgress" | "completed" | "failed" | undefined {
   switch (status) {
+    case "pending":
+    case "inProgress":
+      return "inProgress";
     case "completed":
       return "completed";
     case "failed":
       return "failed";
-    case "pending":
-    case "in_progress":
-      return "inProgress";
     default:
       return undefined;
   }
 }
 
-function toolDetail(toolCall: GeminiToolCall): string | undefined {
-  const location = toolCall.locations?.[0];
-  if (location?.path) {
-    return typeof location.line === "number" ? `${location.path}:${location.line}` : location.path;
-  }
-  return undefined;
+function isAskUserPermissionRequest(request: AcpPermissionRequest): boolean {
+  return request.toolCall?.title?.trim().toLowerCase() === "ask user";
 }
 
-function isAskUserToolCall(toolCall: GeminiToolCall | undefined): boolean {
-  return trimToUndefined(toolCall?.title)?.toLowerCase() === "ask user";
-}
-
-function textFromContentBlock(value: unknown): string | undefined {
-  const block = asRecord(value);
-  const type = asString(block?.type);
-  if (type === "text") {
-    return asString(block?.text);
-  }
-  if (type === "resource") {
-    return asString(asRecord(block?.resource)?.text);
-  }
-  return undefined;
-}
-
-function toolContentDetail(content: ReadonlyArray<unknown> | undefined | null): string | undefined {
-  if (!content) {
-    return undefined;
+function permissionOutcomeFromGeminiOptions(
+  decision: ProviderApprovalDecision,
+  options: ReadonlyArray<EffectAcpSchema.PermissionOption>,
+): { outcome: { outcome: "cancelled" } | { outcome: "selected"; optionId: string } } {
+  if (decision === "cancel") {
+    return { outcome: { outcome: "cancelled" } };
   }
 
-  for (const entry of content) {
-    const record = asRecord(entry);
-    const type = asString(record?.type);
-    if (type === "content") {
-      const text = textFromContentBlock(record?.content);
-      if (text?.trim()) {
-        return text.trim();
+  const pick = (...kinds: ReadonlyArray<EffectAcpSchema.PermissionOptionKind>) =>
+    options.find((option) => kinds.includes(option.kind));
+
+  const selected =
+    decision === "acceptForSession"
+      ? pick("allow_always", "allow_once")
+      : decision === "accept"
+        ? pick("allow_once", "allow_always")
+        : pick("reject_once", "reject_always");
+
+  const optionId =
+    typeof selected?.optionId === "string" && selected.optionId.trim().length > 0
+      ? selected.optionId.trim()
+      : undefined;
+  return optionId
+    ? {
+        outcome: {
+          outcome: "selected",
+          optionId,
+        },
       }
-    }
-    if (type === "diff") {
-      const path = trimToUndefined(record?.path);
-      const kind = trimToUndefined(asRecord(record?._meta)?.kind);
-      return [kind, path].filter(Boolean).join(" ").trim() || "File diff";
-    }
-    if (type === "terminal") {
-      const terminalId = trimToUndefined(record?.terminalId);
-      return terminalId ? `Terminal ${terminalId}` : "Terminal output";
-    }
-  }
+    : { outcome: { outcome: "cancelled" } };
+}
 
-  return undefined;
+function cleanupGeminiSystemSettings(systemSettingsPath: string | undefined): void {
+  if (!systemSettingsPath) {
+    return;
+  }
+  void fs.unlink(systemSettingsPath).catch(() => {
+    // Ignore already deleted temporary settings files.
+  });
 }
 
 function normalizePromptUsage(value: unknown): ThreadTokenUsageSnapshot | undefined {
@@ -565,88 +527,6 @@ function normalizePromptUsage(value: unknown): ThreadTokenUsageSnapshot | undefi
   };
 }
 
-function normalizeUsageUpdate(value: unknown): ThreadTokenUsageSnapshot | undefined {
-  const usage = asRecord(value);
-  const usedTokens = asNumber(usage?.used);
-  if (usedTokens === undefined || usedTokens <= 0) {
-    return undefined;
-  }
-
-  const maxTokens = asNumber(usage?.size);
-  return {
-    usedTokens,
-    ...(maxTokens !== undefined && maxTokens > 0 ? { maxTokens } : {}),
-    lastUsedTokens: usedTokens,
-    compactsAutomatically: true,
-  };
-}
-
-function makeApprovalOutcome(
-  decision: "accept" | "acceptForSession" | "decline" | "cancel",
-  options: ReadonlyArray<GeminiPermissionOption>,
-): { outcome: { outcome: "cancelled" } | { outcome: "selected"; optionId: string } } {
-  if (decision === "cancel") {
-    return { outcome: { outcome: "cancelled" } };
-  }
-
-  const pick = (...kinds: ReadonlyArray<GeminiPermissionOptionKind>) =>
-    options.find((option) => kinds.includes(option.kind));
-
-  const selected =
-    decision === "acceptForSession"
-      ? pick("allow_always", "allow_once")
-      : decision === "accept"
-        ? pick("allow_once", "allow_always")
-        : pick("reject_once", "reject_always");
-
-  if (!selected) {
-    return { outcome: { outcome: "cancelled" } };
-  }
-
-  return {
-    outcome: {
-      outcome: "selected",
-      optionId: selected.optionId,
-    },
-  };
-}
-
-function killChildProcess(child: ChildProcessWithoutNullStreams): void {
-  if (process.platform === "win32" && child.pid !== undefined) {
-    try {
-      spawnSync("taskkill", ["/pid", String(child.pid), "/T", "/F"], { stdio: "ignore" });
-      return;
-    } catch {
-      // Fall back to direct kill below.
-    }
-  }
-
-  child.kill("SIGTERM");
-}
-
-function releaseProcessResources(context: GeminiSessionContext): void {
-  context.stdout.removeAllListeners();
-  context.stderr.removeAllListeners();
-  context.child.removeAllListeners("exit");
-  context.child.removeAllListeners("error");
-  if (context.systemSettingsPath) {
-    void fs.unlink(context.systemSettingsPath).catch(() => {
-      // Ignore already deleted temporary settings files.
-    });
-    context.systemSettingsPath = undefined;
-  }
-  try {
-    context.stdout.close();
-  } catch {
-    // Ignore already closed interfaces.
-  }
-  try {
-    context.stderr.close();
-  } catch {
-    // Ignore already closed interfaces.
-  }
-}
-
 function updateGeminiSession(
   context: GeminiSessionContext,
   patch: Partial<ProviderSession>,
@@ -657,10 +537,6 @@ function updateGeminiSession(
     updatedAt: new Date().toISOString(),
   };
   return context.session;
-}
-
-function currentGeminiTurnId(context: GeminiSessionContext): TurnId | undefined {
-  return context.turnState?.turnId;
 }
 
 function upsertGeminiTurnItem(
@@ -679,1827 +555,1356 @@ function upsertGeminiTurnItem(
   return item;
 }
 
-const makeGeminiAdapter = Effect.fn("makeGeminiAdapter")(function* (
-  options?: GeminiAdapterLiveOptions,
-) {
-  const serverConfig = yield* ServerConfig;
-  const serverSettings = yield* ServerSettingsService;
-  const providerRegistry = yield* ProviderRegistry;
-  const fileSystem = yield* FileSystem.FileSystem;
-  const runtimeContext = yield* Effect.context<never>();
-  const runPromise = Effect.runPromiseWith(runtimeContext);
-  const runFork = Effect.runForkWith(runtimeContext);
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
-  const sessions = new Map<ThreadId, GeminiSessionContext>();
-  const nativeEventLogger =
-    options?.nativeEventLogger ??
-    (options?.nativeEventLogPath !== undefined
-      ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, {
-          stream: "native",
-        })
-      : undefined);
+function settlePendingApprovalsAsCancelled(
+  pendingApprovals: ReadonlyMap<ApprovalRequestId, GeminiPendingApproval>,
+): Effect.Effect<void> {
+  const pendingEntries = Array.from(pendingApprovals.values());
+  return Effect.forEach(
+    pendingEntries,
+    (pending) => Deferred.succeed(pending.decision, "cancel").pipe(Effect.ignore),
+    {
+      discard: true,
+    },
+  );
+}
 
-  const writeNativeRecord = Effect.fn("writeNativeRecord")(function* (
-    threadId: ThreadId | null,
-    record: unknown,
-  ) {
-    if (!nativeEventLogger) {
-      return;
-    }
-    yield* nativeEventLogger.write(record, threadId);
-  });
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
 
-  const getGeminiSettings = Effect.fn("getGeminiSettings")(function* (threadId: ThreadId) {
-    return yield* serverSettings.getSettings.pipe(
-      Effect.map((settings) => settings.providers.gemini),
-      Effect.mapError(
-        (error) =>
+function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
+  return Effect.gen(function* () {
+    const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const fileSystem = yield* FileSystem.FileSystem;
+    const serverConfig = yield* ServerConfig;
+    const serverSettings = yield* ServerSettingsService;
+    const providerRegistry = yield* ProviderRegistry;
+    const runtimeContext = yield* Effect.context<never>();
+    const runFork = Effect.runForkWith(runtimeContext);
+    const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
+    const nativeEventLogger =
+      options?.nativeEventLogger ??
+      (options?.nativeEventLogPath !== undefined
+        ? yield* makeEventNdjsonLogger(options.nativeEventLogPath, {
+            stream: "native",
+          })
+        : undefined);
+    const managedNativeEventLogger =
+      options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
+
+    const sessions = new Map<ThreadId, GeminiSessionContext>();
+    const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+
+    const makeEventStamp = () => ({
+      eventId: EventId.make(crypto.randomUUID()),
+      createdAt: new Date().toISOString(),
+    });
+
+    const makeEventBase = (context: GeminiSessionContext) => ({
+      ...makeEventStamp(),
+      provider: PROVIDER,
+      threadId: context.threadId,
+    });
+
+    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      Queue.offer(runtimeEventQueue, event);
+
+    const getThreadSemaphore = (threadId: string) =>
+      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
+        const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(
+          current.get(threadId),
+        );
+        return Option.match(existing, {
+          onNone: () =>
+            Semaphore.make(1).pipe(
+              Effect.map((semaphore) => {
+                const next = new Map(current);
+                next.set(threadId, semaphore);
+                return [semaphore, next] as const;
+              }),
+            ),
+          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
+        });
+      });
+
+    const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
+      Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
+
+    const getGeminiSettings = Effect.fn("getGeminiSettings")(function* (threadId: ThreadId) {
+      return yield* serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.providers.gemini),
+        Effect.mapError(
+          (error) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId,
+              detail: error.message,
+              cause: error,
+            }),
+        ),
+      );
+    });
+
+    const prepareGeminiLaunchConfig = Effect.fn("prepareGeminiLaunchConfig")(function* (input: {
+      readonly threadId: ThreadId;
+      readonly selectedModel?: string;
+    }) {
+      const providers = yield* providerRegistry.getProviders;
+      const providerModels =
+        providers
+          .find((provider) => provider.provider === PROVIDER)
+          ?.models.map((model) => model.slug) ?? [];
+      const candidateModels = [
+        ...providerModels,
+        ...(input.selectedModel ? [input.selectedModel] : []),
+      ].filter((model, index, collection) => collection.indexOf(model) === index);
+      const aliases = buildGeminiThinkingModelConfigAliases(candidateModels);
+
+      if (Object.keys(aliases).length === 0) {
+        return {
+          env: undefined,
+          systemSettingsPath: undefined,
+        };
+      }
+
+      const systemSettingsPath = path.join(
+        T3CODE_GEMINI_SETTINGS_DIR,
+        `${input.threadId}-${crypto.randomUUID()}.json`,
+      );
+      yield* Effect.tryPromise({
+        try: async () => {
+          await fs.mkdir(T3CODE_GEMINI_SETTINGS_DIR, { recursive: true });
+          await fs.writeFile(
+            systemSettingsPath,
+            JSON.stringify(
+              {
+                modelConfigs: {
+                  aliases,
+                },
+              },
+              null,
+              2,
+            ),
+            "utf8",
+          );
+        },
+        catch: (cause) =>
           new ProviderAdapterProcessError({
             provider: PROVIDER,
-            threadId,
-            detail: error.message,
-            cause: error,
+            threadId: input.threadId,
+            detail: `Failed to prepare Gemini thinking settings: ${toMessage(cause, "write failed")}`,
+            cause,
           }),
-      ),
-    );
-  });
+      });
 
-  const prepareGeminiLaunchConfig = Effect.fn("prepareGeminiLaunchConfig")(function* (input: {
-    readonly threadId: ThreadId;
-    readonly selectedModel?: string;
-  }) {
-    const providers = yield* providerRegistry.getProviders;
-    const providerModels =
-      providers
-        .find((provider) => provider.provider === PROVIDER)
-        ?.models.map((model) => model.slug) ?? [];
-    const candidateModels = [
-      ...providerModels,
-      ...(input.selectedModel ? [input.selectedModel] : []),
-    ].filter((model, index, collection) => collection.indexOf(model) === index);
-    const aliases = buildGeminiThinkingModelConfigAliases(candidateModels);
-
-    if (Object.keys(aliases).length === 0) {
       return {
-        env: process.env,
-        systemSettingsPath: undefined,
+        systemSettingsPath,
+        env: {
+          ...process.env,
+          GEMINI_CLI_SYSTEM_SETTINGS_PATH: systemSettingsPath,
+        },
       };
-    }
+    });
 
-    const systemSettingsPath = path.join(
-      T3CODE_GEMINI_SETTINGS_DIR,
-      `${input.threadId}-${crypto.randomUUID()}.json`,
-    );
-    yield* Effect.tryPromise({
-      try: async () => {
-        await fs.mkdir(T3CODE_GEMINI_SETTINGS_DIR, { recursive: true });
-        await fs.writeFile(
-          systemSettingsPath,
-          JSON.stringify(
-            {
-              modelConfigs: {
-                aliases,
-              },
-            },
-            null,
-            2,
-          ),
-          "utf8",
+    const snapshotThread = (context: GeminiSessionContext) => ({
+      threadId: context.threadId,
+      turns: context.turns.map((turn) => ({
+        id: turn.id,
+        items: cloneUnknownArray(turn.items),
+      })),
+    });
+
+    const requireSession = (
+      threadId: ThreadId,
+    ): Effect.Effect<GeminiSessionContext, ProviderAdapterError> => {
+      const context = sessions.get(threadId);
+      if (!context) {
+        return Effect.fail(
+          new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
         );
-      },
-      catch: (cause) =>
-        new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId: input.threadId,
-          detail: `Failed to prepare Gemini thinking settings: ${toMessage(cause, "write failed")}`,
-          cause,
-        }),
-    });
-
-    return {
-      systemSettingsPath,
-      env: {
-        ...process.env,
-        GEMINI_CLI_SYSTEM_SETTINGS_PATH: systemSettingsPath,
-      },
+      }
+      if (context.stopped) {
+        return Effect.fail(new ProviderAdapterSessionClosedError({ provider: PROVIDER, threadId }));
+      }
+      return Effect.succeed(context);
     };
-  });
 
-  const spawnGeminiProcess = Effect.fn("spawnGeminiProcess")(function* (
-    threadId: ThreadId,
-    binaryPath: string,
-    cwd: string,
-    env?: NodeJS.ProcessEnv,
-  ) {
-    return yield* Effect.try({
-      try: () =>
-        spawn(binaryPath, ["--acp"], {
-          cwd,
-          env: env ?? process.env,
-          stdio: ["pipe", "pipe", "pipe"],
-          shell: process.platform === "win32",
-        }),
-      catch: (cause) =>
-        new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId,
-          detail: `Failed to spawn Gemini CLI: ${toMessage(cause, "spawn failed")}`,
-          cause,
-        }),
-    });
-  });
-
-  const makeSessionContext = (input: {
-    threadId: ThreadId;
-    runtimeMode: ProviderSession["runtimeMode"];
-    runtimeModeId: string;
-    cwd: string;
-    child: ChildProcessWithoutNullStreams;
-    turns?: ReadonlyArray<GeminiStoredTurn>;
-    sessionFilePath?: string;
-    systemSettingsPath?: string;
-  }): GeminiSessionContext => {
-    const now = new Date().toISOString();
-    return {
-      session: {
-        provider: PROVIDER,
-        status: "connecting",
-        runtimeMode: input.runtimeMode,
-        cwd: input.cwd,
-        threadId: input.threadId,
-        createdAt: now,
-        updatedAt: now,
-      },
-      child: input.child,
-      stdout: readline.createInterface({ input: input.child.stdout }),
-      stderr: readline.createInterface({ input: input.child.stderr }),
-      pending: new Map(),
-      pendingApprovals: new Map(),
-      turns: (input.turns ?? []).map(cloneStoredTurn),
-      runtimeModeId: input.runtimeModeId,
-      nextRequestId: 1,
-      sessionId: "",
-      currentModeId: undefined,
-      currentModelId: undefined,
-      turnState: undefined,
-      sessionFilePath: input.sessionFilePath,
-      systemSettingsPath: input.systemSettingsPath,
-      suppressSessionUpdates: false,
-      stopped: false,
-      exitEmitted: false,
-      lastKnownTokenUsage: undefined,
-    };
-  };
-
-  const snapshotThread = (context: GeminiSessionContext) => ({
-    threadId: context.session.threadId,
-    turns: context.turns.map((turn) => ({
-      id: turn.id,
-      items: cloneUnknownArray(turn.items),
-    })),
-  });
-
-  const makeEventBase = (context: GeminiSessionContext) => ({
-    eventId: EventId.make(crypto.randomUUID()),
-    provider: PROVIDER,
-    threadId: context.session.threadId,
-    createdAt: new Date().toISOString(),
-  });
-
-  const offerRuntimeEvent = Effect.fn("offerRuntimeEvent")(function* (event: ProviderRuntimeEvent) {
-    yield* Queue.offer(runtimeEventQueue, event);
-  });
-
-  const requireSession = Effect.fn("requireSession")(function* (threadId: ThreadId) {
-    const context = sessions.get(threadId);
-    if (!context) {
-      return yield* new ProviderAdapterSessionNotFoundError({
-        provider: PROVIDER,
-        threadId,
-      });
-    }
-    if (context.stopped) {
-      return yield* new ProviderAdapterSessionClosedError({
-        provider: PROVIDER,
-        threadId,
-      });
-    }
-    return context;
-  });
-
-  const emitSessionState = Effect.fn("emitSessionState")(function* (
-    context: GeminiSessionContext,
-    state: "starting" | "ready" | "running" | "stopped" | "error",
-    reason?: string,
-    detail?: unknown,
-  ) {
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      type: "session.state.changed",
-      payload: {
-        state,
-        ...(reason ? { reason } : {}),
-        ...(detail !== undefined ? { detail } : {}),
-      },
-      ...(detail !== undefined
-        ? {
-            raw: {
-              source: "gemini.acp.message",
-              method: "session.state",
-              payload: detail,
-            },
-          }
-        : {}),
-    });
-  });
-
-  const emitRuntimeWarning = Effect.fn("emitRuntimeWarning")(function* (
-    context: GeminiSessionContext,
-    message: string,
-    raw?: {
-      readonly source: "gemini.acp.message" | "gemini.acp.stdout" | "gemini.acp.stderr";
-      readonly method?: string;
-      readonly payload: unknown;
-    },
-  ) {
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      type: "runtime.warning",
-      payload: { message, ...(raw ? { detail: raw.payload } : {}) },
-      ...(raw ? { raw } : {}),
-    });
-  });
-
-  const emitRuntimeError = Effect.fn("emitRuntimeError")(function* (
-    context: GeminiSessionContext,
-    message: string,
-    detail?: unknown,
-    turnId?: TurnId,
-  ) {
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      ...(turnId ? { turnId } : {}),
-      type: "runtime.error",
-      payload: {
-        message,
-        class: "provider_error",
-        ...(detail !== undefined ? { detail } : {}),
-      },
-      ...(detail !== undefined
-        ? {
-            raw: {
-              source: "gemini.acp.message",
-              method: "runtime.error",
-              payload: detail,
-            },
-          }
-        : {}),
-    });
-  });
-
-  const emitUsage = Effect.fn("emitUsage")(function* (
-    context: GeminiSessionContext,
-    usage: ThreadTokenUsageSnapshot,
-    turnId?: TurnId,
-    rawPayload?: unknown,
-  ) {
-    context.lastKnownTokenUsage = {
-      ...context.lastKnownTokenUsage,
-      ...usage,
-      usedTokens: usage.usedTokens,
-    };
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      ...(turnId ? { turnId } : {}),
-      type: "thread.token-usage.updated",
-      payload: { usage: context.lastKnownTokenUsage },
-      ...(rawPayload !== undefined
-        ? {
-            raw: {
-              source: "gemini.acp.message",
-              method: "session/update",
-              payload: rawPayload,
-            },
-          }
-        : {}),
-    });
-  });
-
-  const emitTextItemStarted = Effect.fn("emitTextItemStarted")(function* (
-    context: GeminiSessionContext,
-    streamKind: "assistant_text" | "reasoning_text",
-  ) {
-    const turnState = context.turnState;
-    if (!turnState) {
-      return;
-    }
-    const isAssistant = streamKind === "assistant_text";
-    if (
-      (isAssistant && turnState.assistantTextStarted) ||
-      (!isAssistant && turnState.reasoningTextStarted)
-    ) {
-      return;
-    }
-
-    const itemId = isAssistant
-      ? turnState.assistantItemId
-      : (turnState.reasoningItemId ??
-        RuntimeItemId.make(`gemini-reasoning-${crypto.randomUUID()}`));
-    if (!isAssistant) {
-      turnState.reasoningItemId = itemId;
-      turnState.reasoningTextStarted = true;
-    } else {
-      turnState.assistantTextStarted = true;
-    }
-
-    upsertGeminiTurnItem(turnState, itemId, isAssistant ? "assistant_message" : "reasoning", {
-      status: "inProgress",
-      title: isAssistant ? "Assistant message" : "Reasoning",
-    });
-
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      turnId: turnState.turnId,
-      itemId,
-      type: "item.started",
-      payload: {
-        itemType: isAssistant ? "assistant_message" : "reasoning",
-        status: "inProgress",
-        title: isAssistant ? "Assistant message" : "Reasoning",
-      },
-    });
-  });
-
-  const emitTextDelta = Effect.fn("emitTextDelta")(function* (
-    context: GeminiSessionContext,
-    streamKind: "assistant_text" | "reasoning_text",
-    delta: string,
-    rawPayload: unknown,
-  ) {
-    if (delta.length === 0) {
-      return;
-    }
-    const turnState = context.turnState;
-    if (!turnState) {
-      return;
-    }
-
-    yield* emitTextItemStarted(context, streamKind);
-    const itemId =
-      streamKind === "assistant_text"
-        ? turnState.assistantItemId
-        : (turnState.reasoningItemId as RuntimeItemId);
-    const item = upsertGeminiTurnItem(
-      turnState,
-      itemId,
-      streamKind === "assistant_text" ? "assistant_message" : "reasoning",
-      {},
-    );
-    item.text = `${item.text ?? ""}${delta}`;
-    if (streamKind === "assistant_text") {
-      turnState.assistantText = `${turnState.assistantText}${delta}`;
-    } else {
-      turnState.reasoningText = `${turnState.reasoningText}${delta}`;
-    }
-
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      turnId: turnState.turnId,
-      itemId,
-      type: "content.delta",
-      payload: {
-        streamKind,
-        delta,
-      },
-      raw: {
-        source: "gemini.acp.message",
-        method: "session/update",
-        payload: rawPayload,
-      },
-    });
-  });
-
-  const emitToolLifecycle = Effect.fn("emitToolLifecycle")(function* (
-    context: GeminiSessionContext,
-    lifecycle: "item.started" | "item.updated" | "item.completed",
-    toolCall: GeminiToolCall,
-    rawPayload: unknown,
-  ) {
-    const turnState = context.turnState;
-    if (!turnState) {
-      return;
-    }
-    const providerItemId = trimToUndefined(toolCall.toolCallId);
-    if (!providerItemId) {
-      return;
-    }
-    const itemId = RuntimeItemId.make(`gemini-tool-${providerItemId}`);
-    const itemType = itemTypeFromToolKind(toolCall.kind ?? undefined);
-    const status = statusFromToolStatus(toolCall.status);
-    const detail = toolContentDetail(toolCall.content) ?? toolDetail(toolCall);
-    const title = trimToUndefined(toolCall.title);
-    const toolPatch: Partial<GeminiRecordedItem> = {
-      ...(title ? { title } : {}),
-      ...(detail ? { detail } : {}),
-      ...(status ? { status } : {}),
-      data: toolCall,
-    };
-    upsertGeminiTurnItem(turnState, itemId, itemType, toolPatch);
-
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      turnId: turnState.turnId,
-      itemId,
-      type: lifecycle,
-      payload: {
-        itemType,
-        ...(status ? { status } : {}),
-        ...(trimToUndefined(toolCall.title) ? { title: trimToUndefined(toolCall.title) } : {}),
-        ...(detail ? { detail } : {}),
-        data: toolCall,
-      },
-      providerRefs: {
-        providerItemId: ProviderItemId.make(providerItemId),
-      },
-      raw: {
-        source: "gemini.acp.message",
-        method: "session/update",
-        payload: rawPayload,
-      },
-    });
-  });
-
-  const finishTurn = Effect.fn("finishTurn")(function* (
-    context: GeminiSessionContext,
-    result: {
-      readonly state: "completed" | "failed" | "cancelled" | "interrupted";
-      readonly stopReason?: string | null;
-      readonly usage?: unknown;
-      readonly errorMessage?: string;
-    },
-  ) {
-    const turnState = context.turnState;
-    if (!turnState) {
-      return;
-    }
-
-    if (turnState.assistantTextStarted) {
-      yield* offerRuntimeEvent({
+    const emitSessionState = (
+      context: GeminiSessionContext,
+      state: "starting" | "ready" | "running" | "stopped" | "error",
+      reason?: string,
+      detail?: unknown,
+    ) =>
+      offerRuntimeEvent({
         ...makeEventBase(context),
-        turnId: turnState.turnId,
-        itemId: turnState.assistantItemId,
-        type: "item.completed",
+        type: "session.state.changed",
         payload: {
-          itemType: "assistant_message",
-          status: result.state === "failed" ? "failed" : "completed",
-          title: "Assistant message",
+          state,
+          ...(reason ? { reason } : {}),
+          ...(detail !== undefined ? { detail } : {}),
         },
+        ...(detail !== undefined
+          ? {
+              raw: {
+                source: "acp.jsonrpc" as const,
+                method: "session/state",
+                payload: detail,
+              },
+            }
+          : {}),
       });
-      upsertGeminiTurnItem(turnState, turnState.assistantItemId, "assistant_message", {
-        status: result.state === "failed" ? "failed" : "completed",
-      });
-    }
 
-    if (turnState.reasoningItemId && turnState.reasoningTextStarted) {
-      yield* offerRuntimeEvent({
+    const emitRuntimeWarning = (
+      context: GeminiSessionContext,
+      message: string,
+      raw?: {
+        readonly method: string;
+        readonly payload: unknown;
+      },
+    ) =>
+      offerRuntimeEvent({
         ...makeEventBase(context),
-        turnId: turnState.turnId,
-        itemId: turnState.reasoningItemId,
-        type: "item.completed",
+        ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
+        type: "runtime.warning",
+        payload: { message, ...(raw ? { detail: raw.payload } : {}) },
+        ...(raw
+          ? {
+              raw: {
+                source: "acp.jsonrpc" as const,
+                method: raw.method,
+                payload: raw.payload,
+              },
+            }
+          : {}),
+      });
+
+    const emitRuntimeError = (
+      context: GeminiSessionContext,
+      message: string,
+      detail?: unknown,
+      turnId?: TurnId,
+    ) =>
+      offerRuntimeEvent({
+        ...makeEventBase(context),
+        ...(turnId ? { turnId } : {}),
+        type: "runtime.error",
         payload: {
-          itemType: "reasoning",
-          status: "completed",
-          title: "Reasoning",
+          message,
+          class: "provider_error",
+          ...(detail !== undefined ? { detail } : {}),
         },
+        ...(detail !== undefined
+          ? {
+              raw: {
+                source: "acp.jsonrpc" as const,
+                method: "runtime/error",
+                payload: detail,
+              },
+            }
+          : {}),
       });
-      upsertGeminiTurnItem(turnState, turnState.reasoningItemId, "reasoning", {
-        status: "completed",
+
+    const emitUsage = (
+      context: GeminiSessionContext,
+      usage: ThreadTokenUsageSnapshot,
+      turnId?: TurnId,
+      rawPayload?: unknown,
+    ) => {
+      context.lastKnownTokenUsage = {
+        ...context.lastKnownTokenUsage,
+        ...usage,
+        usedTokens: usage.usedTokens,
+      };
+      return offerRuntimeEvent({
+        ...makeEventBase(context),
+        ...(turnId ? { turnId } : {}),
+        type: "thread.token-usage.updated",
+        payload: { usage: context.lastKnownTokenUsage },
+        ...(rawPayload !== undefined
+          ? {
+              raw: {
+                source: "acp.jsonrpc" as const,
+                method: "session/update",
+                payload: rawPayload,
+              },
+            }
+          : {}),
       });
-    }
+    };
 
-    const normalizedUsage = normalizePromptUsage(result.usage);
-    if (normalizedUsage) {
-      yield* emitUsage(context, normalizedUsage, turnState.turnId, result.usage);
-    }
-
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      turnId: turnState.turnId,
-      type: "turn.completed",
-      payload: {
-        state: result.state,
-        ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
-        ...(result.usage !== undefined ? { usage: result.usage } : {}),
-        ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
-      },
-    });
-
-    const storedTurn = yield* persistTurnSnapshot(context, turnState.turnId, turnState.items).pipe(
-      Effect.catch((error) =>
-        emitRuntimeWarning(context, error.message, {
-          source: "gemini.acp.message",
-          method: "session/snapshot",
-          payload: {
-            message: error.message,
-          },
-        }).pipe(
-          Effect.as({
-            id: turnState.turnId,
-            items: cloneUnknownArray(turnState.items),
-          } satisfies GeminiStoredTurn),
-        ),
-      ),
-    );
-    context.turns.push(storedTurn);
-    context.turnState = undefined;
-    updateGeminiSession(context, {
-      status: "ready",
-      activeTurnId: undefined,
-      resumeCursor: buildResumeCursor(context),
-      ...(result.state === "failed" && result.errorMessage
-        ? { lastError: result.errorMessage }
-        : {}),
-    });
-    yield* emitSessionState(context, "ready");
-  });
-
-  const rejectPendingRequests = (context: GeminiSessionContext, detail: string) => {
-    for (const [id, pending] of context.pending) {
-      clearTimeout(pending.timeout);
-      pending.reject(
-        new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: pending.method,
-          detail,
-        }),
-      );
-      context.pending.delete(id);
-    }
-  };
-
-  const disposeSessionContext = (
-    context: GeminiSessionContext,
-    detail: string,
-    options?: {
-      readonly removeFromSessions?: boolean;
-    },
-  ): void => {
-    context.stopped = true;
-    context.exitEmitted = true;
-    rejectPendingRequests(context, detail);
-    context.pendingApprovals.clear();
-    releaseProcessResources(context);
-    killChildProcess(context.child);
-    if (options?.removeFromSessions && sessions.get(context.session.threadId) === context) {
-      sessions.delete(context.session.threadId);
-    }
-  };
-
-  const handleProcessExit = Effect.fn("handleProcessExit")(function* (
-    context: GeminiSessionContext,
-    input: {
-      readonly detail: string;
-      readonly exitKind: "graceful" | "error";
-      readonly recoverable?: boolean;
-    },
-  ) {
-    if (context.exitEmitted) {
-      return;
-    }
-    context.exitEmitted = true;
-    context.stopped = true;
-
-    rejectPendingRequests(context, input.detail);
-
-    if (context.turnState && input.exitKind === "error") {
-      yield* emitRuntimeError(
-        context,
-        input.detail,
-        { detail: input.detail },
-        context.turnState.turnId,
-      );
-      yield* finishTurn(context, {
-        state: "failed",
-        errorMessage: input.detail,
-      });
-    }
-
-    updateGeminiSession(context, {
-      status: input.exitKind === "error" ? "error" : "closed",
-      activeTurnId: undefined,
-      ...(input.exitKind === "error" ? { lastError: input.detail } : {}),
-    });
-    yield* emitSessionState(
-      context,
-      input.exitKind === "error" ? "error" : "stopped",
-      input.exitKind === "error" ? "process_exit" : "session_closed",
-    );
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      type: "session.exited",
-      payload: {
-        reason: input.detail,
-        exitKind: input.exitKind,
-        ...(input.recoverable !== undefined ? { recoverable: input.recoverable } : {}),
-      },
-    });
-
-    releaseProcessResources(context);
-    if (sessions.get(context.session.threadId) === context) {
-      sessions.delete(context.session.threadId);
-    }
-  });
-
-  const writeJsonMessage = Effect.fn("writeJsonMessage")(function* (
-    context: GeminiSessionContext,
-    message: unknown,
-  ) {
-    const payload = `${JSON.stringify({ jsonrpc: "2.0", ...asRecord(message) })}\n`;
-    yield* Effect.try({
-      try: () => {
-        if (!context.child.stdin.writable) {
-          throw new Error("Gemini ACP stdin is not writable.");
+    const emitReasoningItemStarted = (context: GeminiSessionContext) =>
+      Effect.gen(function* () {
+        const turnState = context.turnState;
+        if (!turnState || turnState.reasoningTextStarted) {
+          return;
         }
-        context.child.stdin.write(payload);
-      },
-      catch: (cause) =>
-        new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId: context.session.threadId,
-          detail: toMessage(cause, "Failed to write Gemini ACP message."),
-          cause,
-        }),
-    });
-  });
+        const itemId = RuntimeItemId.make(`gemini-reasoning-${crypto.randomUUID()}`);
+        turnState.reasoningItemId = itemId;
+        turnState.reasoningTextStarted = true;
+        upsertGeminiTurnItem(turnState, itemId, "reasoning", {
+          status: "inProgress",
+          title: "Reasoning",
+        });
+        yield* offerRuntimeEvent({
+          ...makeEventBase(context),
+          turnId: turnState.turnId,
+          itemId,
+          type: "item.started",
+          payload: {
+            itemType: "reasoning",
+            status: "inProgress",
+            title: "Reasoning",
+          },
+        });
+      });
 
-  const sendRequest = <T = unknown>(
-    context: GeminiSessionContext,
-    method: string,
-    params: Record<string, unknown>,
-  ): Effect.Effect<T, ProviderAdapterError> =>
-    Effect.tryPromise({
-      try: () =>
-        new Promise<T>((resolve, reject) => {
-          const id = context.nextRequestId++;
-          const timeoutMs = geminiRequestTimeoutMs(method);
-          const timeout = setTimeout(() => {
-            context.pending.delete(String(id));
-            reject(
-              new ProviderAdapterRequestError({
+    const emitContentDelta = (
+      context: GeminiSessionContext,
+      event: Extract<AcpParsedSessionEvent, { readonly _tag: "ContentDelta" }>,
+    ) =>
+      Effect.gen(function* () {
+        if (!context.turnState || event.text.length === 0) {
+          return;
+        }
+
+        let itemId = event.itemId;
+        if (event.streamKind === "reasoning_text") {
+          yield* emitReasoningItemStarted(context);
+          itemId = context.turnState.reasoningItemId;
+        }
+        if (!itemId) {
+          return;
+        }
+
+        const itemType =
+          event.streamKind === "assistant_text" ? "assistant_message" : ("reasoning" as const);
+        const existing = upsertGeminiTurnItem(context.turnState, itemId, itemType, {});
+        existing.text = `${existing.text ?? ""}${event.text}`;
+
+        yield* offerRuntimeEvent(
+          makeAcpContentDeltaEvent({
+            stamp: makeEventStamp(),
+            provider: PROVIDER,
+            threadId: context.threadId,
+            turnId: context.turnState.turnId,
+            streamKind: event.streamKind,
+            itemId,
+            text: event.text,
+            rawPayload: event.rawPayload,
+          }),
+        );
+      });
+
+    const handleAcpEvent = (context: GeminiSessionContext, event: AcpParsedSessionEvent) =>
+      Effect.gen(function* () {
+        switch (event._tag) {
+          case "ModeChanged":
+            context.currentModeId = event.modeId;
+            return;
+          case "AssistantItemStarted": {
+            if (!context.turnState) {
+              return;
+            }
+            upsertGeminiTurnItem(context.turnState, event.itemId, "assistant_message", {
+              status: "inProgress",
+              title: "Assistant message",
+            });
+            yield* offerRuntimeEvent(
+              makeAcpAssistantItemEvent({
+                stamp: makeEventStamp(),
                 provider: PROVIDER,
-                method,
-                detail: `Gemini ACP request timed out after ${timeoutMs}ms.`,
-              }),
-            );
-          }, timeoutMs);
-
-          context.pending.set(String(id), {
-            method,
-            timeout,
-            resolve: (value) => resolve(value as T),
-            reject: (error) => reject(error),
-          });
-
-          if (!context.child.stdin.writable) {
-            clearTimeout(timeout);
-            context.pending.delete(String(id));
-            reject(
-              new ProviderAdapterRequestError({
-                provider: PROVIDER,
-                method,
-                detail: "Gemini ACP stdin is not writable.",
+                threadId: context.threadId,
+                turnId: context.turnState.turnId,
+                itemId: event.itemId,
+                lifecycle: "item.started",
               }),
             );
             return;
           }
-
-          context.child.stdin.write(
-            `${JSON.stringify({
-              jsonrpc: "2.0",
-              id,
-              method,
-              params,
-            })}\n`,
-          );
-        }),
-      catch: (cause) =>
-        asString(asRecord(cause)?._tag) === "ProviderAdapterRequestError"
-          ? (cause as ProviderAdapterRequestError)
-          : new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method,
-              detail: toMessage(cause, `${method} failed`),
-              cause,
-            }),
-    });
-
-  const sendNotification = (
-    context: GeminiSessionContext,
-    method: string,
-    params: Record<string, unknown>,
-  ) =>
-    writeJsonMessage(context, { method, params }).pipe(
-      Effect.mapError((cause) =>
-        asString(asRecord(cause)?._tag) === "ProviderAdapterProcessError"
-          ? (cause as ProviderAdapterProcessError)
-          : new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method,
-              detail: toMessage(cause, `${method} failed`),
-              cause,
-            }),
-      ),
-    );
-
-  const parsePermissionOptions = (value: unknown): ReadonlyArray<GeminiPermissionOption> =>
-    asArray(value)
-      ?.map((entry) => {
-        const record = asRecord(entry);
-        const optionId = trimToUndefined(record?.optionId);
-        const name = trimToUndefined(record?.name);
-        const kind = trimToUndefined(record?.kind) as GeminiPermissionOptionKind | undefined;
-        if (!optionId || !name || !kind) {
-          return null;
-        }
-        return { optionId, name, kind } satisfies GeminiPermissionOption;
-      })
-      .filter((entry): entry is GeminiPermissionOption => entry !== null) ?? [];
-
-  const parseToolCall = (value: unknown): GeminiToolCall | undefined => {
-    const record = asRecord(value);
-    const toolCallId = trimToUndefined(record?.toolCallId);
-    if (!toolCallId) {
-      return undefined;
-    }
-
-    return {
-      toolCallId,
-      title: trimToUndefined(record?.title) ?? null,
-      kind: (trimToUndefined(record?.kind) as GeminiToolKind | undefined) ?? null,
-      status: (trimToUndefined(record?.status) as GeminiToolStatus | undefined) ?? null,
-      content: asArray(record?.content) ?? null,
-      locations:
-        asArray(record?.locations)?.reduce<Array<GeminiToolCallLocation>>((acc, entry) => {
-          const location = asRecord(entry);
-          const path = trimToUndefined(location?.path);
-          if (!path) {
-            return acc;
+          case "AssistantItemCompleted": {
+            if (!context.turnState) {
+              return;
+            }
+            upsertGeminiTurnItem(context.turnState, event.itemId, "assistant_message", {
+              status: "completed",
+            });
+            yield* offerRuntimeEvent(
+              makeAcpAssistantItemEvent({
+                stamp: makeEventStamp(),
+                provider: PROVIDER,
+                threadId: context.threadId,
+                turnId: context.turnState.turnId,
+                itemId: event.itemId,
+                lifecycle: "item.completed",
+              }),
+            );
+            return;
           }
-          acc.push({
-            path,
-            line: asNumber(location?.line) ?? null,
-          });
-          return acc;
-        }, []) ?? null,
-      rawInput: record?.rawInput,
-      rawOutput: record?.rawOutput,
-    };
-  };
-
-  const handlePermissionRequest = Effect.fn("handlePermissionRequest")(function* (
-    context: GeminiSessionContext,
-    requestId: JsonRpcId,
-    params: unknown,
-  ) {
-    const record = asRecord(params);
-    const toolCall = parseToolCall(record?.toolCall);
-    const requestType = requestTypeFromToolKind(toolCall?.kind ?? undefined);
-    const detail = isAskUserToolCall(toolCall)
-      ? "Gemini CLI requested user input, but Gemini ACP did not include the question payload. Accepting this request will continue with an empty answer set."
-      : (toolContentDetail(toolCall?.content) ?? toolDetail(toolCall ?? { toolCallId: "" }));
-    const approvalRequestId = ApprovalRequestId.make(`gemini-approval-${crypto.randomUUID()}`);
-    context.pendingApprovals.set(approvalRequestId, {
-      acpRequestId: requestId,
-      options: parsePermissionOptions(record?.options),
-      requestType,
-      ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
-      ...(toolCall?.toolCallId ? { providerItemId: toolCall.toolCallId } : {}),
-      ...(detail ? { detail } : {}),
-    });
-
-    if (toolCall) {
-      yield* emitToolLifecycle(
-        context,
-        context.turnState?.items.some((item) => item.id === `gemini-tool-${toolCall.toolCallId}`)
-          ? "item.updated"
-          : "item.started",
-        toolCall,
-        params,
-      );
-    }
-
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
-      requestId: RuntimeRequestId.make(approvalRequestId),
-      type: "request.opened",
-      payload: {
-        requestType,
-        ...(detail ? { detail } : {}),
-        args: {
-          ...(toolCall ? { toolCall } : {}),
-          options: record?.options,
-        },
-      },
-      providerRefs: {
-        providerRequestId: String(requestId),
-        ...(toolCall?.toolCallId
-          ? { providerItemId: ProviderItemId.make(toolCall.toolCallId) }
-          : {}),
-      },
-      raw: {
-        source: "gemini.acp.message",
-        method: "session/request_permission",
-        payload: params,
-      },
-    });
-  });
-
-  const handleSessionUpdate = Effect.fn("handleSessionUpdate")(function* (
-    context: GeminiSessionContext,
-    update: unknown,
-    rawPayload: unknown,
-  ) {
-    const record = asRecord(update);
-    const sessionUpdate = trimToUndefined(record?.sessionUpdate);
-    if (!sessionUpdate) {
-      return;
-    }
-
-    switch (sessionUpdate) {
-      case "agent_message_chunk":
-      case "agent_thought_chunk": {
-        const delta = textFromContentBlock(record?.content);
-        if (!delta) {
-          return;
+          case "PlanUpdated":
+            yield* offerRuntimeEvent(
+              makeAcpPlanUpdatedEvent({
+                stamp: makeEventStamp(),
+                provider: PROVIDER,
+                threadId: context.threadId,
+                turnId: context.turnState?.turnId,
+                payload: event.payload,
+                source: "acp.jsonrpc",
+                method: "session/update",
+                rawPayload: event.rawPayload,
+              }),
+            );
+            return;
+          case "ToolCallUpdated": {
+            if (!context.turnState) {
+              return;
+            }
+            const runtimeStatus = runtimeStatusFromAcpToolStatus(event.toolCall.status);
+            const itemPatch: Partial<GeminiRecordedItem> = {
+              data: event.toolCall.data,
+            };
+            if (event.toolCall.title) {
+              itemPatch.title = event.toolCall.title;
+            }
+            if (event.toolCall.detail) {
+              itemPatch.detail = event.toolCall.detail;
+            }
+            if (runtimeStatus) {
+              itemPatch.status = runtimeStatus;
+            }
+            upsertGeminiTurnItem(
+              context.turnState,
+              event.toolCall.toolCallId,
+              itemTypeFromAcpToolKind(event.toolCall.kind),
+              itemPatch,
+            );
+            yield* offerRuntimeEvent(
+              makeAcpToolCallEvent({
+                stamp: makeEventStamp(),
+                provider: PROVIDER,
+                threadId: context.threadId,
+                turnId: context.turnState.turnId,
+                toolCall: event.toolCall,
+                rawPayload: event.rawPayload,
+              }),
+            );
+            return;
+          }
+          case "ContentDelta":
+            yield* emitContentDelta(context, event);
+            return;
+          case "UsageUpdated":
+            yield* emitUsage(
+              context,
+              {
+                usedTokens: event.usage.usedTokens,
+                lastUsedTokens: event.usage.usedTokens,
+                ...(event.usage.maxTokens !== undefined
+                  ? { maxTokens: event.usage.maxTokens }
+                  : {}),
+                compactsAutomatically: true,
+              },
+              context.turnState?.turnId,
+              event.rawPayload,
+            );
+            return;
+          case "ThreadMetadataUpdated":
+            yield* offerRuntimeEvent({
+              ...makeEventBase(context),
+              ...(context.turnState ? { turnId: context.turnState.turnId } : {}),
+              type: "thread.metadata.updated",
+              payload: {
+                name: event.name,
+                ...(event.metadata ? { metadata: event.metadata } : {}),
+              },
+              raw: {
+                source: "acp.jsonrpc",
+                method: "session/update",
+                payload: event.rawPayload,
+              },
+            });
+            return;
         }
-        yield* emitTextDelta(
-          context,
-          sessionUpdate === "agent_message_chunk" ? "assistant_text" : "reasoning_text",
-          delta,
-          rawPayload,
-        );
-        return;
-      }
+      });
 
-      case "tool_call": {
-        const toolCall = parseToolCall(record);
-        if (toolCall) {
-          yield* emitToolLifecycle(context, "item.started", toolCall, rawPayload);
-        }
-        return;
-      }
-
-      case "tool_call_update": {
-        const toolCall = parseToolCall(record);
-        if (!toolCall) {
-          return;
-        }
-        const lifecycle =
-          toolCall.status === "completed" || toolCall.status === "failed"
-            ? "item.completed"
-            : "item.updated";
-        yield* emitToolLifecycle(context, lifecycle, toolCall, rawPayload);
-        return;
-      }
-
-      case "plan": {
-        const entries = asArray(record?.entries) ?? [];
-        if (!context.turnState) {
-          return;
-        }
-        yield* offerRuntimeEvent({
-          ...makeEventBase(context),
-          turnId: context.turnState.turnId,
-          type: "turn.plan.updated",
-          payload: {
-            plan: entries
-              .map((entry) => {
-                const planEntry = asRecord(entry);
-                const step = trimToUndefined(planEntry?.content);
-                const status = trimToUndefined(planEntry?.status);
-                if (!step || !status) {
-                  return null;
-                }
-                return {
-                  step,
-                  status:
-                    status === "in_progress"
-                      ? "inProgress"
-                      : status === "completed"
-                        ? "completed"
-                        : "pending",
-                } as const;
-              })
-              .filter(
-                (
-                  entry,
-                ): entry is { step: string; status: "pending" | "inProgress" | "completed" } =>
-                  entry !== null,
-              ),
-          },
-          raw: {
-            source: "gemini.acp.message",
-            method: "session/update",
-            payload: rawPayload,
-          },
-        });
-        return;
-      }
-
-      case "usage_update": {
-        const usage = normalizeUsageUpdate(record);
-        if (usage) {
-          yield* emitUsage(context, usage, currentGeminiTurnId(context), rawPayload);
-        }
-        return;
-      }
-
-      case "current_mode_update": {
-        context.currentModeId = trimToUndefined(record?.currentModeId) ?? context.currentModeId;
-        return;
-      }
-
-      case "session_info_update": {
-        const title = trimToUndefined(record?.title);
-        if (!title) {
-          return;
-        }
-        const updatedAt = trimToUndefined(record?.updatedAt);
-        yield* offerRuntimeEvent({
-          ...makeEventBase(context),
-          type: "thread.metadata.updated",
-          payload: {
-            name: title,
-            ...(updatedAt ? { metadata: { updatedAt } } : {}),
-          },
-          raw: {
-            source: "gemini.acp.message",
-            method: "session/update",
-            payload: rawPayload,
-          },
-        });
-        return;
-      }
-
-      case "available_commands_update":
-      case "config_option_update":
-      default:
-        return;
-    }
-  });
-
-  const handleParsedMessage = Effect.fn("handleParsedMessage")(function* (
-    context: GeminiSessionContext,
-    parsed: Record<string, unknown>,
-  ) {
-    const maybeId = parsed.id;
-    if (
-      (typeof maybeId === "number" || typeof maybeId === "string") &&
-      (Object.hasOwn(parsed, "result") || Object.hasOwn(parsed, "error"))
+    const resolveSessionFilePath = Effect.fn("resolveSessionFilePath")(function* (
+      context: GeminiSessionContext,
+      options?: { readonly retries?: number },
     ) {
-      const pending = context.pending.get(String(maybeId));
-      if (!pending) {
-        return;
-      }
-      clearTimeout(pending.timeout);
-      context.pending.delete(String(maybeId));
-      const error = asRecord(parsed.error);
-      if (error) {
-        pending.reject(
-          new ProviderAdapterRequestError({
-            provider: PROVIDER,
-            method: pending.method,
-            detail: trimToUndefined(error.message) ?? `${pending.method} failed`,
-            cause: parsed.error,
-          }),
-        );
-        return;
-      }
-      pending.resolve(parsed.result);
-      return;
-    }
-
-    const method = trimToUndefined(parsed.method);
-    if (!method) {
-      return;
-    }
-
-    if (method === "session/update") {
-      if (context.suppressSessionUpdates) {
-        return;
-      }
-      const params = asRecord(parsed.params);
-      yield* handleSessionUpdate(context, params?.update, parsed.params);
-      return;
-    }
-
-    if (method === "session/request_permission") {
-      const requestId = parsed.id;
-      if (requestId === undefined || requestId === null) {
-        return;
-      }
-      yield* handlePermissionRequest(context, requestId as JsonRpcId, parsed.params);
-    }
-  });
-
-  const attachProcessListeners = (context: GeminiSessionContext) => {
-    const onStdoutLine = (line: string) => {
-      void runPromise(
-        writeNativeRecord(context.session.threadId, {
-          source: "gemini.acp.stdout",
-          line,
-        }).pipe(
-          Effect.andThen(
-            Effect.sync(() => {
-              const trimmed = line.trim();
-              if (!trimmed.startsWith("{")) {
-                return undefined;
-              }
-              try {
-                return JSON.parse(trimmed) as Record<string, unknown>;
-              } catch {
-                return undefined;
-              }
+      const retries = options?.retries ?? 0;
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const resolvedPath = yield* Effect.tryPromise({
+          try: () => findGeminiSessionFileById(context.sessionId, context.sessionFilePath),
+          catch: (cause) =>
+            new ProviderAdapterProcessError({
+              provider: PROVIDER,
+              threadId: context.threadId,
+              detail: `Failed to locate Gemini session file: ${toMessage(cause, "lookup failed")}`,
+              cause,
             }),
-          ),
-          Effect.flatMap((parsed) =>
-            parsed
-              ? writeNativeRecord(context.session.threadId, {
-                  source: "gemini.acp.message",
-                  payload: parsed,
-                }).pipe(Effect.andThen(handleParsedMessage(context, parsed)))
-              : Effect.void,
-          ),
-        ),
-      );
-    };
-
-    const onStderrLine = (line: string) => {
-      const message = line.trim();
-      if (message.length === 0) {
-        return;
+        });
+        if (resolvedPath) {
+          context.sessionFilePath = resolvedPath;
+          return resolvedPath;
+        }
+        if (attempt < retries) {
+          yield* Effect.sleep(100);
+        }
       }
-      void runPromise(
-        writeNativeRecord(context.session.threadId, {
-          source: "gemini.acp.stderr",
-          line,
-        }).pipe(
-          Effect.andThen(
-            emitRuntimeWarning(context, message, {
-              source: "gemini.acp.stderr",
-              payload: { line: message },
-            }),
-          ),
-        ),
-      );
-    };
+      return undefined;
+    });
 
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      const detail =
-        code === 0
-          ? "Gemini ACP session exited."
-          : `Gemini ACP session exited with code ${code ?? "null"}${signal ? ` (signal ${signal})` : ""}.`;
-      void runPromise(
-        handleProcessExit(context, {
-          detail,
-          exitKind: code === 0 || context.stopped ? "graceful" : "error",
-          recoverable: !context.stopped,
-        }),
-      );
-    };
+    const persistTurnSnapshot = Effect.fn("persistTurnSnapshot")(function* (
+      context: GeminiSessionContext,
+      turnId: TurnId,
+      items: ReadonlyArray<unknown>,
+    ) {
+      const storedTurnBase: GeminiStoredTurn = {
+        id: turnId,
+        items: cloneUnknownArray(items),
+      };
+      const liveSessionFilePath = yield* resolveSessionFilePath(context, { retries: 5 });
+      if (!liveSessionFilePath) {
+        return storedTurnBase;
+      }
 
-    const onError = (error: Error) => {
-      void runPromise(
-        handleProcessExit(context, {
-          detail: `Gemini ACP process error: ${error.message}`,
-          exitKind: "error",
-          recoverable: true,
-        }),
-      );
-    };
-
-    context.stdout.on("line", onStdoutLine);
-    context.stderr.on("line", onStderrLine);
-    context.child.once("exit", onExit);
-    context.child.once("error", onError);
-  };
-
-  const resolveSessionFilePath = Effect.fn("resolveSessionFilePath")(function* (
-    context: GeminiSessionContext,
-    options?: { readonly retries?: number },
-  ) {
-    const retries = options?.retries ?? 0;
-    for (let attempt = 0; attempt <= retries; attempt += 1) {
-      const resolvedPath = yield* Effect.tryPromise({
-        try: () => findGeminiSessionFileById(context.sessionId, context.sessionFilePath),
+      const snapshotSessionId = crypto.randomUUID();
+      const snapshotFilePath = yield* Effect.tryPromise({
+        try: () => cloneGeminiSessionFile(liveSessionFilePath, snapshotSessionId),
         catch: (cause) =>
           new ProviderAdapterProcessError({
             provider: PROVIDER,
-            threadId: context.session.threadId,
-            detail: `Failed to locate Gemini session file: ${toMessage(cause, "lookup failed")}`,
+            threadId: context.threadId,
+            detail: `Failed to snapshot Gemini session history: ${toMessage(cause, "snapshot failed")}`,
             cause,
           }),
       });
-      if (resolvedPath) {
-        context.sessionFilePath = resolvedPath;
-        return resolvedPath;
-      }
-      if (attempt < retries) {
-        yield* Effect.sleep(100);
-      }
-    }
-    return undefined;
-  });
-
-  const persistTurnSnapshot = Effect.fn("persistTurnSnapshot")(function* (
-    context: GeminiSessionContext,
-    turnId: TurnId,
-    items: ReadonlyArray<unknown>,
-  ) {
-    const storedTurnBase: GeminiStoredTurn = {
-      id: turnId,
-      items: cloneUnknownArray(items),
-    };
-    const liveSessionFilePath = yield* resolveSessionFilePath(context, { retries: 5 });
-    if (!liveSessionFilePath) {
-      return storedTurnBase;
-    }
-
-    const snapshotSessionId = crypto.randomUUID();
-    const snapshotFilePath = yield* Effect.tryPromise({
-      try: () => cloneGeminiSessionFile(liveSessionFilePath, snapshotSessionId),
-      catch: (cause) =>
-        new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId: context.session.threadId,
-          detail: `Failed to snapshot Gemini session history: ${toMessage(cause, "snapshot failed")}`,
-          cause,
-        }),
-    });
-
-    return {
-      ...storedTurnBase,
-      snapshotSessionId,
-      snapshotFilePath,
-    } satisfies GeminiStoredTurn;
-  });
-
-  const bootstrapSessionContext = Effect.fn("bootstrapSessionContext")(function* (
-    context: GeminiSessionContext,
-    input: {
-      readonly resumeSessionId?: string;
-      readonly allowResumeFallback?: boolean;
-      readonly model?: string;
-      readonly apiModelId?: string;
-      readonly sessionFilePath?: string;
-    },
-  ) {
-    context.suppressSessionUpdates = true;
-    return yield* Effect.gen(function* () {
-      yield* sendRequest(context, "initialize", {
-        protocolVersion: 1,
-        clientInfo: {
-          name: "t3code",
-          title: "T3 Code",
-          version: "0.1.0",
-        },
-        clientCapabilities: {
-          fs: { readTextFile: false, writeTextFile: false },
-          terminal: false,
-          auth: { terminal: false },
-        },
-      });
-
-      const startResponse = yield* input.resumeSessionId
-        ? input.allowResumeFallback !== false
-          ? sendRequest<Record<string, unknown>>(context, "session/load", {
-              sessionId: input.resumeSessionId,
-              cwd: context.session.cwd ?? process.cwd(),
-              mcpServers: [],
-            }).pipe(
-              Effect.catch(() =>
-                sendRequest<Record<string, unknown>>(context, "session/new", {
-                  cwd: context.session.cwd ?? process.cwd(),
-                  mcpServers: [],
-                }),
-              ),
-            )
-          : sendRequest<Record<string, unknown>>(context, "session/load", {
-              sessionId: input.resumeSessionId,
-              cwd: context.session.cwd ?? process.cwd(),
-              mcpServers: [],
-            })
-        : sendRequest<Record<string, unknown>>(context, "session/new", {
-            cwd: context.session.cwd ?? process.cwd(),
-            mcpServers: [],
-          });
-
-      context.sessionId = resolveStartedGeminiSessionId(input.resumeSessionId, startResponse) ?? "";
-      if (!context.sessionId) {
-        return yield* new ProviderAdapterProcessError({
-          provider: PROVIDER,
-          threadId: context.session.threadId,
-          detail: "Gemini ACP did not return a session id.",
-        });
-      }
-
-      context.currentModeId = trimToUndefined(asRecord(startResponse.modes)?.currentModeId);
-      context.currentModelId = trimToUndefined(asRecord(startResponse.models)?.currentModelId);
-      yield* setGeminiMode(context, context.runtimeModeId);
-
-      if (input.model) {
-        yield* setGeminiModel(context, {
-          model: input.model,
-          acpModelId: input.apiModelId ?? input.model,
-        });
-      }
-
-      context.sessionFilePath = input.sessionFilePath ?? context.sessionFilePath;
-      updateGeminiSession(context, {
-        status: "ready",
-        ...(input.model
-          ? { model: input.model }
-          : context.currentModelId
-            ? { model: context.currentModelId }
-            : {}),
-        resumeCursor: buildResumeCursor(context),
-      });
 
       return {
-        currentModelId: context.currentModelId,
-      };
-    }).pipe(
-      Effect.ensuring(
-        Effect.sync(() => {
-          context.suppressSessionUpdates = false;
+        ...storedTurnBase,
+        snapshotSessionId,
+        snapshotFilePath,
+      } satisfies GeminiStoredTurn;
+    });
+
+    const finishTurn = (
+      context: GeminiSessionContext,
+      result: {
+        readonly state: "completed" | "failed" | "cancelled" | "interrupted";
+        readonly stopReason?: string | null;
+        readonly usage?: unknown;
+        readonly errorMessage?: string;
+      },
+    ) =>
+      Effect.gen(function* () {
+        const turnState = context.turnState;
+        if (!turnState) {
+          return;
+        }
+
+        for (const item of turnState.items) {
+          if (item.itemType !== "assistant_message" || item.status !== "inProgress") {
+            continue;
+          }
+          item.status = result.state === "failed" ? "failed" : "completed";
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            turnId: turnState.turnId,
+            itemId: RuntimeItemId.make(item.id),
+            type: "item.completed",
+            payload: {
+              itemType: "assistant_message",
+              status: item.status,
+              ...(item.title ? { title: item.title } : {}),
+            },
+          });
+        }
+
+        if (turnState.reasoningItemId && turnState.reasoningTextStarted) {
+          upsertGeminiTurnItem(turnState, turnState.reasoningItemId, "reasoning", {
+            status: result.state === "failed" ? "failed" : "completed",
+          });
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            turnId: turnState.turnId,
+            itemId: turnState.reasoningItemId,
+            type: "item.completed",
+            payload: {
+              itemType: "reasoning",
+              status: result.state === "failed" ? "failed" : "completed",
+              title: "Reasoning",
+            },
+          });
+        }
+
+        const normalizedUsage = normalizePromptUsage(result.usage);
+        if (normalizedUsage) {
+          yield* emitUsage(context, normalizedUsage, turnState.turnId, result.usage);
+        }
+
+        yield* offerRuntimeEvent({
+          ...makeEventBase(context),
+          turnId: turnState.turnId,
+          type: "turn.completed",
+          payload: {
+            state: result.state,
+            ...(result.stopReason !== undefined ? { stopReason: result.stopReason } : {}),
+            ...(result.usage !== undefined ? { usage: result.usage } : {}),
+            ...(result.errorMessage ? { errorMessage: result.errorMessage } : {}),
+          },
+        });
+
+        const storedTurn = yield* persistTurnSnapshot(
+          context,
+          turnState.turnId,
+          turnState.items,
+        ).pipe(
+          Effect.catch((error) =>
+            emitRuntimeWarning(context, error.message, {
+              method: "session/snapshot",
+              payload: {
+                message: error.message,
+              },
+            }).pipe(
+              Effect.as({
+                id: turnState.turnId,
+                items: cloneUnknownArray(turnState.items),
+              } satisfies GeminiStoredTurn),
+            ),
+          ),
+        );
+
+        context.turns.push(storedTurn);
+        context.turnState = undefined;
+        updateGeminiSession(context, {
+          status: "ready",
+          activeTurnId: undefined,
+          resumeCursor: buildResumeCursor(context),
+          lastError: result.state === "failed" ? result.errorMessage : undefined,
+        });
+        yield* emitSessionState(context, "ready");
+      });
+
+    const stopSessionInternal = (
+      context: GeminiSessionContext,
+      options?: {
+        readonly emitExitEvent?: boolean;
+      },
+    ) =>
+      Effect.gen(function* () {
+        if (context.stopped) {
+          return;
+        }
+        context.stopped = true;
+        yield* settlePendingApprovalsAsCancelled(context.pendingApprovals);
+        if (context.notificationFiber) {
+          yield* Fiber.interrupt(context.notificationFiber);
+        }
+        yield* Effect.ignore(Scope.close(context.scope, Exit.void));
+        cleanupGeminiSystemSettings(context.systemSettingsPath);
+        context.systemSettingsPath = undefined;
+        updateGeminiSession(context, {
+          status: "closed",
+          activeTurnId: undefined,
+        });
+        if (sessions.get(context.threadId) === context) {
+          sessions.delete(context.threadId);
+        }
+        if (options?.emitExitEvent === false) {
+          return;
+        }
+        yield* offerRuntimeEvent({
+          ...makeEventBase(context),
+          type: "session.exited",
+          payload: {
+            exitKind: "graceful",
+          },
+        });
+      });
+
+    const setGeminiMode = (context: GeminiSessionContext, modeId: string) =>
+      Effect.gen(function* () {
+        if (!modeId || context.currentModeId === modeId) {
+          return;
+        }
+        yield* context.acp
+          .request("session/set_mode", {
+            sessionId: context.sessionId,
+            modeId,
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              mapAcpToAdapterError(PROVIDER, context.threadId, "session/set_mode", cause),
+            ),
+          );
+        context.currentModeId = modeId;
+      });
+
+    const setGeminiModel = (
+      context: GeminiSessionContext,
+      input: {
+        readonly model: string;
+        readonly acpModelId: string;
+      },
+    ) =>
+      Effect.gen(function* () {
+        if (!input.acpModelId || context.currentModelId === input.acpModelId) {
+          if (context.session.model !== input.model) {
+            updateGeminiSession(context, { model: input.model });
+          }
+          return;
+        }
+        yield* context.acp
+          .request("session/set_model", {
+            sessionId: context.sessionId,
+            modelId: input.acpModelId,
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              mapAcpToAdapterError(PROVIDER, context.threadId, "session/set_model", cause),
+            ),
+          );
+        context.currentModelId = input.acpModelId;
+        updateGeminiSession(context, { model: input.model });
+      });
+
+    const buildPromptBlocks = Effect.fn("buildPromptBlocks")(function* (
+      input: ProviderSendTurnInput,
+    ) {
+      const blocks: Array<EffectAcpSchema.ContentBlock> = [];
+
+      if (trimToUndefined(input.input)) {
+        blocks.push({
+          type: "text",
+          text: trimToUndefined(input.input) as string,
+        });
+      }
+
+      for (const attachment of input.attachments ?? []) {
+        if (attachment.type !== "image") {
+          continue;
+        }
+        const attachmentPath = resolveAttachmentPath({
+          attachmentsDir: serverConfig.attachmentsDir,
+          attachment,
+        });
+        if (!attachmentPath) {
+          return yield* new ProviderAdapterRequestError({
+            provider: PROVIDER,
+            method: "session/prompt",
+            detail: `Invalid attachment id '${attachment.id}'.`,
+          });
+        }
+        const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterRequestError({
+                provider: PROVIDER,
+                method: "session/prompt",
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+        blocks.push({
+          type: "image",
+          data: Buffer.from(bytes).toString("base64"),
+          mimeType: attachment.mimeType,
+        });
+      }
+
+      return blocks;
+    });
+
+    const runPromptTurn = (
+      context: GeminiSessionContext,
+      turnId: TurnId,
+      prompt: ReadonlyArray<EffectAcpSchema.ContentBlock>,
+    ) =>
+      Effect.gen(function* () {
+        const promptResult = yield* Effect.result(
+          context.acp
+            .prompt({ prompt })
+            .pipe(
+              Effect.mapError((cause) =>
+                mapAcpToAdapterError(PROVIDER, context.threadId, "session/prompt", cause),
+              ),
+            ),
+        );
+        if (promptResult._tag === "Failure") {
+          const error = promptResult.failure;
+          const message = toMessage(error, "Gemini turn failed.");
+          yield* emitRuntimeError(context, message, error, turnId);
+          yield* finishTurn(context, {
+            state: "failed",
+            errorMessage: message,
+          });
+          return;
+        }
+
+        const response = promptResult.success;
+        const stopReason =
+          isRecord(response) && typeof response.stopReason === "string"
+            ? response.stopReason
+            : null;
+        yield* finishTurn(context, {
+          state: stopReason === "cancelled" ? "cancelled" : "completed",
+          stopReason,
+          usage: isRecord(response) ? response.usage : undefined,
+        });
+      });
+
+    const createGeminiSessionContext = (input: {
+      readonly threadId: ThreadId;
+      readonly runtimeMode: ProviderSession["runtimeMode"];
+      readonly runtimeModeId: string;
+      readonly cwd: string;
+      readonly binaryPath: string;
+      readonly env?: NodeJS.ProcessEnv | Readonly<Record<string, string>>;
+      readonly turns?: ReadonlyArray<GeminiStoredTurn>;
+      readonly resumeSessionId?: string;
+      readonly allowResumeFallback?: boolean;
+      readonly selectedModel?: string;
+      readonly selectedApiModelId?: string;
+      readonly sessionFilePath?: string;
+      readonly systemSettingsPath?: string;
+    }) =>
+      Effect.gen(function* () {
+        const pendingApprovals = new Map<ApprovalRequestId, GeminiPendingApproval>();
+        const sessionScope = yield* Scope.make("sequential");
+        let sessionScopeTransferred = false;
+        yield* Effect.addFinalizer(() =>
+          sessionScopeTransferred
+            ? Effect.void
+            : Scope.close(sessionScope, Exit.void).pipe(
+                Effect.tap(() =>
+                  Effect.sync(() => cleanupGeminiSystemSettings(input.systemSettingsPath)),
+                ),
+                Effect.ignore,
+              ),
+        );
+
+        let context!: GeminiSessionContext;
+        const spawnEnv = toSpawnEnv(input.env);
+        const acp = yield* makeGeminiAcpRuntime({
+          childProcessSpawner,
+          binaryPath: input.binaryPath,
+          cwd: input.cwd,
+          ...(spawnEnv ? { env: spawnEnv } : {}),
+          ...(input.resumeSessionId ? { resumeSessionId: input.resumeSessionId } : {}),
+          ...(input.allowResumeFallback !== undefined
+            ? { allowResumeFallback: input.allowResumeFallback }
+            : {}),
+          clientInfo: { name: "t3-code", version: "0.0.0" },
+          clientCapabilities: {
+            fs: { readTextFile: false, writeTextFile: false },
+            terminal: false,
+            auth: { terminal: false },
+          },
+          ...makeAcpNativeLoggers({
+            nativeEventLogger,
+            provider: PROVIDER,
+            threadId: input.threadId,
+          }),
+        }).pipe(
+          Effect.provideService(Scope.Scope, sessionScope),
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+
+        yield* acp.handleRequestPermission((params) =>
+          Effect.gen(function* () {
+            const permissionRequest = parsePermissionRequest(params);
+            const approvalRequestId = ApprovalRequestId.make(
+              `gemini-approval-${crypto.randomUUID()}`,
+            );
+            const runtimeRequestId = RuntimeRequestId.make(approvalRequestId);
+            const decision = yield* Deferred.make<ProviderApprovalDecision>();
+            pendingApprovals.set(approvalRequestId, { decision });
+            const detail = isAskUserPermissionRequest(permissionRequest)
+              ? "Gemini CLI requested user input, but Gemini ACP did not include the question payload. Accepting this request will continue with an empty answer set."
+              : (permissionRequest.detail ?? JSON.stringify(params).slice(0, 2000));
+
+            yield* offerRuntimeEvent(
+              makeAcpRequestOpenedEvent({
+                stamp: makeEventStamp(),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId: context?.turnState?.turnId,
+                requestId: runtimeRequestId,
+                permissionRequest,
+                detail,
+                args: {
+                  ...(permissionRequest.toolCall ? { toolCall: permissionRequest.toolCall } : {}),
+                  options: params.options,
+                },
+                source: "acp.jsonrpc",
+                method: "session/request_permission",
+                rawPayload: params,
+              }),
+            );
+
+            const resolved = yield* Deferred.await(decision);
+            pendingApprovals.delete(approvalRequestId);
+
+            yield* offerRuntimeEvent(
+              makeAcpRequestResolvedEvent({
+                stamp: makeEventStamp(),
+                provider: PROVIDER,
+                threadId: input.threadId,
+                turnId: context?.turnState?.turnId,
+                requestId: runtimeRequestId,
+                permissionRequest,
+                decision: resolved,
+              }),
+            );
+
+            return permissionOutcomeFromGeminiOptions(resolved, params.options);
+          }),
+        );
+
+        const started = yield* acp.start().pipe(
+          Effect.mapError(
+            (cause) =>
+              new ProviderAdapterProcessError({
+                provider: PROVIDER,
+                threadId: input.threadId,
+                detail: cause.message,
+                cause,
+              }),
+          ),
+        );
+
+        const now = new Date().toISOString();
+        const sessionSetupRecord = asRecord(started.sessionSetupResult);
+        context = {
+          threadId: input.threadId,
+          session: {
+            provider: PROVIDER,
+            status: "connecting",
+            runtimeMode: input.runtimeMode,
+            cwd: input.cwd,
+            threadId: input.threadId,
+            createdAt: now,
+            updatedAt: now,
+          },
+          scope: sessionScope,
+          acp,
+          notificationFiber: undefined,
+          pendingApprovals,
+          turns: (input.turns ?? []).map(cloneStoredTurn),
+          runtimeModeId: input.runtimeModeId,
+          sessionId: started.sessionId,
+          currentModeId: trimToUndefined(asRecord(sessionSetupRecord?.modes)?.currentModeId),
+          currentModelId: trimToUndefined(asRecord(sessionSetupRecord?.models)?.currentModelId),
+          turnState: undefined,
+          sessionFilePath: input.sessionFilePath,
+          systemSettingsPath: input.systemSettingsPath,
+          stopped: false,
+          lastKnownTokenUsage: undefined,
+        };
+
+        context.notificationFiber = yield* Stream.runDrain(
+          Stream.mapEffect(acp.getEvents(), (event) => handleAcpEvent(context, event)),
+        ).pipe(Effect.forkChild);
+
+        yield* setGeminiMode(context, input.runtimeModeId);
+        if (input.selectedModel) {
+          yield* setGeminiModel(context, {
+            model: input.selectedModel,
+            acpModelId: input.selectedApiModelId ?? input.selectedModel,
+          });
+        }
+
+        updateGeminiSession(context, {
+          status: "ready",
+          ...(input.selectedModel
+            ? { model: input.selectedModel }
+            : context.currentModelId
+              ? { model: context.currentModelId }
+              : {}),
+          resumeCursor: buildResumeCursor(context),
+        });
+
+        sessionScopeTransferred = true;
+        return context;
+      });
+
+    const startSession: GeminiAdapterShape["startSession"] = (input) =>
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          if (input.provider && input.provider !== PROVIDER) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
+            });
+          }
+
+          const existing = sessions.get(input.threadId);
+          if (existing && !existing.stopped) {
+            yield* stopSessionInternal(existing, { emitExitEvent: false });
+          }
+
+          const geminiSettings = yield* getGeminiSettings(input.threadId);
+          const cwd = path.resolve(input.cwd ?? process.cwd());
+          const runtimeModeId = runtimeModeToGeminiModeId(input.runtimeMode);
+          const selectedGeminiModel =
+            input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
+          const selectedApiModelId =
+            input.modelSelection?.provider === PROVIDER
+              ? resolveApiModelId(input.modelSelection)
+              : undefined;
+          const requestedResumeSessionId = readResumeSessionId(input.resumeCursor);
+          const resumeTurns = readResumeTurns(input.resumeCursor);
+          const launchConfig = yield* prepareGeminiLaunchConfig({
+            threadId: input.threadId,
+            ...(selectedGeminiModel ? { selectedModel: selectedGeminiModel } : {}),
+          });
+
+          const context = yield* createGeminiSessionContext({
+            threadId: input.threadId,
+            runtimeMode: input.runtimeMode,
+            runtimeModeId,
+            cwd,
+            binaryPath: geminiSettings.binaryPath,
+            ...(launchConfig.env ? { env: launchConfig.env } : {}),
+            turns: resumeTurns,
+            ...(requestedResumeSessionId ? { resumeSessionId: requestedResumeSessionId } : {}),
+            allowResumeFallback: true,
+            ...(selectedGeminiModel ? { selectedModel: selectedGeminiModel } : {}),
+            ...(selectedApiModelId ? { selectedApiModelId } : {}),
+            ...(launchConfig.systemSettingsPath
+              ? { systemSettingsPath: launchConfig.systemSettingsPath }
+              : {}),
+          });
+
+          sessions.set(input.threadId, context);
+
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            type: "session.started",
+            payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
+          });
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            type: "session.configured",
+            payload: {
+              config: {
+                cwd,
+                modeId: context.currentModeId ?? runtimeModeId,
+                ...(context.session.model ? { model: context.session.model } : {}),
+              },
+            },
+          });
+          yield* emitSessionState(context, "ready");
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            type: "thread.started",
+            payload: {
+              providerThreadId: context.sessionId,
+            },
+          });
+
+          return context.session;
+        }).pipe(Effect.scoped),
+      );
+
+    const sendTurn: GeminiAdapterShape["sendTurn"] = (input) =>
+      withThreadLock(
+        input.threadId,
+        Effect.gen(function* () {
+          const context = yield* requireSession(input.threadId);
+          if (context.turnState) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: "A Gemini turn is already in progress for this thread.",
+            });
+          }
+
+          if (input.modelSelection?.provider === PROVIDER) {
+            yield* setGeminiModel(context, {
+              model: input.modelSelection.model,
+              acpModelId: resolveApiModelId(input.modelSelection),
+            });
+          }
+
+          yield* setGeminiMode(
+            context,
+            input.interactionMode === "plan" ? "plan" : context.runtimeModeId,
+          );
+
+          const prompt = yield* buildPromptBlocks(input);
+          if (prompt.length === 0) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "sendTurn",
+              issue: "Either input text or at least one attachment is required.",
+            });
+          }
+
+          const turnId = TurnId.make(crypto.randomUUID());
+          context.turnState = {
+            turnId,
+            reasoningItemId: undefined,
+            items: [],
+            reasoningTextStarted: false,
+          };
+          updateGeminiSession(context, {
+            status: "running",
+            activeTurnId: turnId,
+            lastError: undefined,
+          });
+
+          yield* emitSessionState(context, "running");
+          yield* offerRuntimeEvent({
+            ...makeEventBase(context),
+            turnId,
+            type: "turn.started",
+            payload: context.session.model ? { model: context.session.model } : {},
+          });
+
+          runFork(runPromptTurn(context, turnId, prompt));
+
+          return {
+            threadId: input.threadId,
+            turnId,
+            resumeCursor: buildResumeCursor(context),
+          };
         }),
+      );
+
+    const interruptTurn: GeminiAdapterShape["interruptTurn"] = (threadId, turnId) =>
+      withThreadLock(
+        threadId,
+        Effect.gen(function* () {
+          const context = yield* requireSession(threadId);
+          if (turnId && context.turnState && context.turnState.turnId !== turnId) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "interruptTurn",
+              issue: `Turn '${turnId}' is not active for thread '${threadId}'.`,
+            });
+          }
+          if (!context.turnState) {
+            return;
+          }
+          yield* settlePendingApprovalsAsCancelled(context.pendingApprovals);
+          yield* context.acp.cancel.pipe(
+            Effect.mapError((cause) =>
+              mapAcpToAdapterError(PROVIDER, threadId, "session/cancel", cause),
+            ),
+          );
+        }),
+      );
+
+    const respondToRequest: GeminiAdapterShape["respondToRequest"] = (
+      threadId,
+      requestId,
+      decision,
+    ) =>
+      withThreadLock(
+        threadId,
+        Effect.gen(function* () {
+          const context = yield* requireSession(threadId);
+          const pending = context.pendingApprovals.get(requestId);
+          if (!pending) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "respondToRequest",
+              issue: `Unknown Gemini approval request '${requestId}'.`,
+            });
+          }
+          yield* Deferred.succeed(pending.decision, decision);
+        }),
+      );
+
+    const respondToUserInput: GeminiAdapterShape["respondToUserInput"] = (
+      _threadId,
+      _requestId,
+      _answers,
+    ) =>
+      Effect.fail(
+        new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "respondToUserInput",
+          issue:
+            "Gemini ACP does not expose structured user-input answers. Gemini Ask User requests can only be approved or declined.",
+        }),
+      );
+
+    const stopSession: GeminiAdapterShape["stopSession"] = (threadId) =>
+      withThreadLock(
+        threadId,
+        Effect.gen(function* () {
+          const context = yield* requireSession(threadId);
+          yield* stopSessionInternal(context);
+        }),
+      );
+
+    const listSessions: GeminiAdapterShape["listSessions"] = () =>
+      Effect.sync(() =>
+        Array.from(sessions.values())
+          .filter((context) => !context.stopped)
+          .map((context) => Object.assign({}, context.session)),
+      );
+
+    const hasSession: GeminiAdapterShape["hasSession"] = (threadId) =>
+      Effect.sync(() => {
+        const context = sessions.get(threadId);
+        return context !== undefined && !context.stopped;
+      });
+
+    const readThread: GeminiAdapterShape["readThread"] = (threadId) =>
+      Effect.gen(function* () {
+        const context = yield* requireSession(threadId);
+        return snapshotThread(context);
+      });
+
+    const rollbackThread: GeminiAdapterShape["rollbackThread"] = (threadId, numTurns) =>
+      withThreadLock(
+        threadId,
+        Effect.gen(function* () {
+          const context = yield* requireSession(threadId);
+          if (!Number.isInteger(numTurns) || numTurns < 1) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "rollbackThread",
+              issue: "numTurns must be an integer >= 1.",
+            });
+          }
+          if (context.turnState) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "rollbackThread",
+              issue: "Cannot roll back a Gemini thread while a turn is in progress.",
+            });
+          }
+
+          const nextLength = Math.max(0, context.turns.length - numTurns);
+          const nextTurns = context.turns.slice(0, nextLength).map(cloneStoredTurn);
+          const cwd = context.session.cwd ?? process.cwd();
+          const geminiSettings = yield* getGeminiSettings(threadId);
+
+          let resumeSessionId: string | undefined;
+          let sessionFilePath: string | undefined;
+          if (nextLength > 0) {
+            const targetTurn = nextTurns[nextLength - 1];
+            if (!targetTurn?.snapshotSessionId) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "rollbackThread",
+                issue: "Gemini session snapshot is unavailable for the requested rollback target.",
+              });
+            }
+            const targetSnapshotSessionId = targetTurn.snapshotSessionId;
+
+            const sourceSnapshotPath = yield* Effect.tryPromise({
+              try: () =>
+                findGeminiSessionFileById(targetSnapshotSessionId, targetTurn.snapshotFilePath),
+              catch: (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId,
+                  detail: `Failed to locate Gemini rollback snapshot: ${toMessage(cause, "lookup failed")}`,
+                  cause,
+                }),
+            });
+            if (!sourceSnapshotPath) {
+              return yield* new ProviderAdapterValidationError({
+                provider: PROVIDER,
+                operation: "rollbackThread",
+                issue: "Gemini rollback snapshot file could not be found.",
+              });
+            }
+
+            resumeSessionId = crypto.randomUUID();
+            sessionFilePath = yield* Effect.tryPromise({
+              try: () => cloneGeminiSessionFile(sourceSnapshotPath, resumeSessionId as string),
+              catch: (cause) =>
+                new ProviderAdapterProcessError({
+                  provider: PROVIDER,
+                  threadId,
+                  detail: `Failed to restore Gemini rollback snapshot: ${toMessage(cause, "restore failed")}`,
+                  cause,
+                }),
+            });
+          }
+
+          const launchConfig = yield* prepareGeminiLaunchConfig({
+            threadId,
+            ...(context.session.model ? { selectedModel: context.session.model } : {}),
+          });
+
+          const nextContext = yield* createGeminiSessionContext({
+            threadId,
+            runtimeMode: context.session.runtimeMode,
+            runtimeModeId: context.runtimeModeId,
+            cwd,
+            binaryPath: geminiSettings.binaryPath,
+            ...(launchConfig.env ? { env: launchConfig.env } : {}),
+            turns: nextTurns,
+            ...(resumeSessionId ? { resumeSessionId } : {}),
+            allowResumeFallback: false,
+            ...(context.session.model ? { selectedModel: context.session.model } : {}),
+            ...(context.currentModelId ? { selectedApiModelId: context.currentModelId } : {}),
+            ...(sessionFilePath ? { sessionFilePath } : {}),
+            ...(launchConfig.systemSettingsPath
+              ? { systemSettingsPath: launchConfig.systemSettingsPath }
+              : {}),
+          });
+
+          yield* stopSessionInternal(context, { emitExitEvent: false });
+          sessions.set(threadId, nextContext);
+
+          return snapshotThread(nextContext);
+        }).pipe(Effect.scoped),
+      );
+
+    const stopAll: GeminiAdapterShape["stopAll"] = () =>
+      Effect.forEach(sessions.values(), (context) => stopSessionInternal(context), {
+        discard: true,
+      }).pipe(Effect.asVoid);
+
+    yield* Effect.addFinalizer(() =>
+      Effect.forEach(sessions.values(), (context) => stopSessionInternal(context), {
+        discard: true,
+      }).pipe(
+        Effect.tap(() => managedNativeEventLogger?.close() ?? Effect.void),
+        Effect.tap(() => Queue.shutdown(runtimeEventQueue)),
       ),
     );
-  });
-
-  const setGeminiMode = Effect.fn("setGeminiMode")(function* (
-    context: GeminiSessionContext,
-    modeId: string,
-  ) {
-    if (context.currentModeId === modeId) {
-      return;
-    }
-    yield* sendRequest(context, "session/set_mode", {
-      sessionId: context.sessionId,
-      modeId,
-    });
-    context.currentModeId = modeId;
-  });
-
-  const setGeminiModel = Effect.fn("setGeminiModel")(function* (
-    context: GeminiSessionContext,
-    input: {
-      readonly model: string;
-      readonly acpModelId: string;
-    },
-  ) {
-    if (context.currentModelId === input.acpModelId) {
-      return;
-    }
-    yield* sendRequest(context, "session/set_model", {
-      sessionId: context.sessionId,
-      modelId: input.acpModelId,
-    });
-    context.currentModelId = input.acpModelId;
-    updateGeminiSession(context, { model: input.model });
-  });
-
-  const buildPromptBlocks = Effect.fn("buildPromptBlocks")(function* (
-    input: ProviderSendTurnInput,
-  ) {
-    const blocks: Array<Record<string, unknown>> = [];
-
-    if (trimToUndefined(input.input)) {
-      blocks.push({
-        type: "text",
-        text: trimToUndefined(input.input),
-      });
-    }
-
-    for (const attachment of input.attachments ?? []) {
-      if (attachment.type !== "image") {
-        continue;
-      }
-      const attachmentPath = resolveAttachmentPath({
-        attachmentsDir: serverConfig.attachmentsDir,
-        attachment,
-      });
-      if (!attachmentPath) {
-        return yield* new ProviderAdapterRequestError({
-          provider: PROVIDER,
-          method: "turn/start",
-          detail: `Invalid attachment id '${attachment.id}'.`,
-        });
-      }
-      const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProviderAdapterRequestError({
-              provider: PROVIDER,
-              method: "turn/start",
-              detail: `Failed to read attachment file: ${cause.message}.`,
-              cause,
-            }),
-        ),
-      );
-      blocks.push({
-        type: "image",
-        mimeType: attachment.mimeType,
-        data: Buffer.from(bytes).toString("base64"),
-      });
-    }
-
-    return blocks;
-  });
-
-  const runPromptTurn = Effect.fn("runPromptTurn")(function* (
-    context: GeminiSessionContext,
-    turnId: TurnId,
-    prompt: ReadonlyArray<Record<string, unknown>>,
-  ) {
-    const promptResult = yield* Effect.result(
-      sendRequest<Record<string, unknown>>(context, "session/prompt", {
-        sessionId: context.sessionId,
-        prompt,
-      }),
-    );
-    if (promptResult._tag === "Failure") {
-      const error = promptResult.failure;
-      const message = toMessage(error, "Gemini turn failed.");
-      yield* emitRuntimeError(context, message, error, turnId);
-      yield* finishTurn(context, {
-        state: "failed",
-        errorMessage: message,
-      });
-      return;
-    }
-
-    const response = promptResult.success;
-
-    if (!response) {
-      return;
-    }
-
-    const stopReason = asString(response.stopReason) ?? null;
-    yield* finishTurn(context, {
-      state: stopReason === "cancelled" ? "cancelled" : "completed",
-      stopReason,
-      usage: response.usage,
-    });
-  });
-
-  const startSession: GeminiAdapterShape["startSession"] = Effect.fn("startSession")(
-    function* (input) {
-      if (input.provider && input.provider !== PROVIDER) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "startSession",
-          issue: `Expected provider '${PROVIDER}' but received '${input.provider}'.`,
-        });
-      }
-
-      const existing = sessions.get(input.threadId);
-      if (existing) {
-        disposeSessionContext(existing, "Session replaced while starting a new Gemini session.", {
-          removeFromSessions: true,
-        });
-      }
-
-      const geminiSettings = yield* getGeminiSettings(input.threadId);
-      const cwd = input.cwd ?? process.cwd();
-      const runtimeModeId = runtimeModeToGeminiModeId(input.runtimeMode);
-      const selectedGeminiModel =
-        input.modelSelection?.provider === PROVIDER ? input.modelSelection.model : undefined;
-      const launchConfig = yield* prepareGeminiLaunchConfig({
-        threadId: input.threadId,
-        ...(selectedGeminiModel ? { selectedModel: selectedGeminiModel } : {}),
-      });
-      const child = yield* spawnGeminiProcess(
-        input.threadId,
-        geminiSettings.binaryPath,
-        cwd,
-        launchConfig.env,
-      ).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            if (launchConfig.systemSettingsPath) {
-              void fs.unlink(launchConfig.systemSettingsPath).catch(() => {
-                // Ignore cleanup failures for temporary settings files.
-              });
-            }
-          }),
-        ),
-      );
-      const requestedResumeSessionId = readResumeSessionId(input.resumeCursor);
-      const resumeTurns = readResumeTurns(input.resumeCursor);
-      const context = makeSessionContext({
-        threadId: input.threadId,
-        runtimeMode: input.runtimeMode,
-        runtimeModeId,
-        cwd,
-        child,
-        turns: resumeTurns,
-        ...(launchConfig.systemSettingsPath
-          ? { systemSettingsPath: launchConfig.systemSettingsPath }
-          : {}),
-      });
-
-      attachProcessListeners(context);
-      sessions.set(input.threadId, context);
-      const bootstrapInput = {
-        allowResumeFallback: true,
-        ...(requestedResumeSessionId ? { resumeSessionId: requestedResumeSessionId } : {}),
-        ...(input.modelSelection?.provider === PROVIDER
-          ? {
-              model: input.modelSelection.model,
-              apiModelId: resolveApiModelId(input.modelSelection),
-            }
-          : {}),
-      };
-      yield* bootstrapSessionContext(context, bootstrapInput).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            disposeSessionContext(context, "Gemini session failed during startup.", {
-              removeFromSessions: true,
-            });
-          }),
-        ),
-      );
-
-      yield* offerRuntimeEvent({
-        ...makeEventBase(context),
-        type: "session.started",
-        payload: input.resumeCursor !== undefined ? { resume: input.resumeCursor } : {},
-      });
-      yield* offerRuntimeEvent({
-        ...makeEventBase(context),
-        type: "session.configured",
-        payload: {
-          config: {
-            cwd,
-            modeId: context.currentModeId ?? runtimeModeId,
-            ...(context.session.model ? { model: context.session.model } : {}),
-          },
-        },
-      });
-      yield* emitSessionState(context, "ready");
-      yield* offerRuntimeEvent({
-        ...makeEventBase(context),
-        type: "thread.started",
-        payload: {
-          providerThreadId: context.sessionId,
-        },
-      });
-
-      return context.session;
-    },
-  );
-
-  const sendTurn: GeminiAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    const context = yield* requireSession(input.threadId);
-    if (context.turnState) {
-      return yield* new ProviderAdapterValidationError({
-        provider: PROVIDER,
-        operation: "sendTurn",
-        issue: "A Gemini turn is already in progress for this thread.",
-      });
-    }
-
-    if (input.modelSelection?.provider === PROVIDER) {
-      yield* setGeminiModel(context, {
-        model: input.modelSelection.model,
-        acpModelId: resolveApiModelId(input.modelSelection),
-      });
-    }
-
-    if (input.interactionMode === "plan") {
-      yield* setGeminiMode(context, "plan");
-    } else {
-      yield* setGeminiMode(context, context.runtimeModeId);
-    }
-
-    const prompt = yield* buildPromptBlocks(input);
-    if (prompt.length === 0) {
-      return yield* new ProviderAdapterValidationError({
-        provider: PROVIDER,
-        operation: "sendTurn",
-        issue: "Either input text or at least one attachment is required.",
-      });
-    }
-
-    const turnId = TurnId.make(crypto.randomUUID());
-    context.turnState = {
-      turnId,
-      startedAt: new Date().toISOString(),
-      assistantItemId: RuntimeItemId.make(`gemini-assistant-${crypto.randomUUID()}`),
-      reasoningItemId: undefined,
-      items: [],
-      assistantTextStarted: false,
-      reasoningTextStarted: false,
-      assistantText: "",
-      reasoningText: "",
-    };
-    updateGeminiSession(context, {
-      status: "running",
-      activeTurnId: turnId,
-      ...(input.modelSelection?.provider === PROVIDER ? { model: input.modelSelection.model } : {}),
-    });
-
-    yield* emitSessionState(context, "running");
-    yield* offerRuntimeEvent({
-      ...makeEventBase(context),
-      turnId,
-      type: "turn.started",
-      payload: context.session.model ? { model: context.session.model } : {},
-    });
-
-    runFork(runPromptTurn(context, turnId, prompt));
 
     return {
-      threadId: input.threadId,
-      turnId,
-      resumeCursor: buildResumeCursor(context),
-    };
+      provider: PROVIDER,
+      capabilities: {
+        sessionModelSwitch: "in-session",
+      },
+      startSession,
+      sendTurn,
+      interruptTurn,
+      respondToRequest,
+      respondToUserInput,
+      stopSession,
+      listSessions,
+      hasSession,
+      readThread,
+      rollbackThread,
+      stopAll,
+      get streamEvents() {
+        return Stream.fromQueue(runtimeEventQueue);
+      },
+    } satisfies GeminiAdapterShape;
   });
-
-  const interruptTurn: GeminiAdapterShape["interruptTurn"] = (threadId, turnId) =>
-    Effect.gen(function* () {
-      const context = yield* requireSession(threadId);
-      if (turnId && context.turnState && context.turnState.turnId !== turnId) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "interruptTurn",
-          issue: `Turn '${turnId}' is not active for thread '${threadId}'.`,
-        });
-      }
-      if (!context.turnState) {
-        return;
-      }
-      yield* sendNotification(context, "session/cancel", {
-        sessionId: context.sessionId,
-      });
-    });
-
-  const respondToRequest: GeminiAdapterShape["respondToRequest"] = (
-    threadId,
-    requestId,
-    decision,
-  ) =>
-    Effect.gen(function* () {
-      const context = yield* requireSession(threadId);
-      const pending = context.pendingApprovals.get(requestId);
-      if (!pending) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "respondToRequest",
-          issue: `Unknown Gemini approval request '${requestId}'.`,
-        });
-      }
-
-      yield* writeJsonMessage(context, {
-        id: pending.acpRequestId,
-        result: makeApprovalOutcome(decision, pending.options),
-      });
-      context.pendingApprovals.delete(requestId);
-
-      yield* offerRuntimeEvent({
-        ...makeEventBase(context),
-        ...(pending.turnId ? { turnId: pending.turnId } : {}),
-        requestId: RuntimeRequestId.make(requestId),
-        type: "request.resolved",
-        payload: {
-          requestType: pending.requestType,
-          decision,
-          resolution: makeApprovalOutcome(decision, pending.options),
-        },
-        providerRefs: {
-          providerRequestId: String(pending.acpRequestId),
-          ...(pending.providerItemId
-            ? { providerItemId: ProviderItemId.make(pending.providerItemId) }
-            : {}),
-        },
-        raw: {
-          source: "gemini.acp.message",
-          method: "session/request_permission",
-          payload: {
-            decision,
-          },
-        },
-      });
-    });
-
-  const respondToUserInput: GeminiAdapterShape["respondToUserInput"] = (
-    _threadId,
-    _requestId,
-    _answers,
-  ) =>
-    Effect.fail(
-      new ProviderAdapterValidationError({
-        provider: PROVIDER,
-        operation: "respondToUserInput",
-        issue:
-          "Gemini ACP does not expose structured user-input answers. Gemini Ask User requests can only be approved or declined.",
-      }),
-    );
-
-  const stopSession: GeminiAdapterShape["stopSession"] = (threadId) =>
-    Effect.gen(function* () {
-      const context = yield* requireSession(threadId);
-      context.stopped = true;
-      killChildProcess(context.child);
-    });
-
-  const listSessions: GeminiAdapterShape["listSessions"] = () =>
-    Effect.succeed(
-      Array.from(sessions.values())
-        .filter((context) => !context.stopped)
-        .map((context) => context.session),
-    );
-
-  const hasSession: GeminiAdapterShape["hasSession"] = (threadId) =>
-    Effect.succeed(Boolean(sessions.get(threadId) && !sessions.get(threadId)?.stopped));
-
-  const readThread: GeminiAdapterShape["readThread"] = (threadId) =>
-    Effect.gen(function* () {
-      const context = yield* requireSession(threadId);
-      return snapshotThread(context);
-    });
-
-  const rollbackThread: GeminiAdapterShape["rollbackThread"] = Effect.fn("rollbackThread")(
-    function* (threadId, numTurns) {
-      const context = yield* requireSession(threadId);
-      if (context.turnState) {
-        return yield* new ProviderAdapterValidationError({
-          provider: PROVIDER,
-          operation: "rollbackThread",
-          issue: "Cannot roll back a Gemini thread while a turn is in progress.",
-        });
-      }
-
-      const nextLength = Math.max(0, context.turns.length - numTurns);
-      if (nextLength === context.turns.length) {
-        return snapshotThread(context);
-      }
-
-      const nextTurns = context.turns.slice(0, nextLength).map(cloneStoredTurn);
-      const cwd = context.session.cwd ?? process.cwd();
-      const geminiSettings = yield* getGeminiSettings(threadId);
-
-      let resumeSessionId: string | undefined;
-      let sessionFilePath: string | undefined;
-      if (nextLength > 0) {
-        const targetTurn = nextTurns[nextLength - 1];
-        if (!targetTurn) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "Gemini session snapshot is unavailable for the requested rollback target.",
-          });
-        }
-        const targetSnapshotSessionId = targetTurn.snapshotSessionId;
-        if (!targetSnapshotSessionId) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "Gemini session snapshot is unavailable for the requested rollback target.",
-          });
-        }
-
-        const sourceSnapshotPath = yield* Effect.tryPromise({
-          try: () =>
-            findGeminiSessionFileById(targetSnapshotSessionId, targetTurn.snapshotFilePath),
-          catch: (cause) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId,
-              detail: `Failed to locate Gemini rollback snapshot: ${toMessage(cause, "lookup failed")}`,
-              cause,
-            }),
-        });
-        if (!sourceSnapshotPath) {
-          return yield* new ProviderAdapterValidationError({
-            provider: PROVIDER,
-            operation: "rollbackThread",
-            issue: "Gemini rollback snapshot file could not be found.",
-          });
-        }
-
-        resumeSessionId = crypto.randomUUID();
-        sessionFilePath = yield* Effect.tryPromise({
-          try: () => cloneGeminiSessionFile(sourceSnapshotPath, resumeSessionId as string),
-          catch: (cause) =>
-            new ProviderAdapterProcessError({
-              provider: PROVIDER,
-              threadId,
-              detail: `Failed to restore Gemini rollback snapshot: ${toMessage(cause, "restore failed")}`,
-              cause,
-            }),
-        });
-      }
-
-      const launchConfig = yield* prepareGeminiLaunchConfig({
-        threadId,
-        ...(context.session.model ? { selectedModel: context.session.model } : {}),
-      });
-      const child = yield* spawnGeminiProcess(
-        threadId,
-        geminiSettings.binaryPath,
-        cwd,
-        launchConfig.env,
-      ).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            if (launchConfig.systemSettingsPath) {
-              void fs.unlink(launchConfig.systemSettingsPath).catch(() => {
-                // Ignore cleanup failures for temporary settings files.
-              });
-            }
-          }),
-        ),
-      );
-      const nextContext = makeSessionContext({
-        threadId,
-        runtimeMode: context.session.runtimeMode,
-        runtimeModeId: context.runtimeModeId,
-        cwd,
-        child,
-        turns: nextTurns,
-        ...(sessionFilePath ? { sessionFilePath } : {}),
-        ...(launchConfig.systemSettingsPath
-          ? { systemSettingsPath: launchConfig.systemSettingsPath }
-          : {}),
-      });
-      attachProcessListeners(nextContext);
-
-      const rollbackBootstrapInput = {
-        allowResumeFallback: false,
-        ...(resumeSessionId ? { resumeSessionId } : {}),
-        ...(context.session.model
-          ? {
-              model: context.session.model,
-              apiModelId: context.currentModelId ?? context.session.model,
-            }
-          : {}),
-        ...(sessionFilePath ? { sessionFilePath } : {}),
-      };
-      yield* bootstrapSessionContext(nextContext, rollbackBootstrapInput).pipe(
-        Effect.tapError(() =>
-          Effect.sync(() => {
-            disposeSessionContext(nextContext, "Gemini rollback session failed during startup.");
-          }),
-        ),
-      );
-
-      disposeSessionContext(context, "Session replaced during rollback.");
-
-      sessions.set(threadId, nextContext);
-      return snapshotThread(nextContext);
-    },
-  );
-
-  const stopAll: GeminiAdapterShape["stopAll"] = () =>
-    Effect.forEach(Array.from(sessions.keys()), (threadId) => stopSession(threadId), {
-      concurrency: "unbounded",
-      discard: true,
-    }).pipe(Effect.asVoid);
-
-  yield* Effect.addFinalizer(() =>
-    Effect.sync(() => {
-      for (const context of Array.from(sessions.values())) {
-        disposeSessionContext(context, "Gemini adapter is shutting down.", {
-          removeFromSessions: true,
-        });
-      }
-    }).pipe(Effect.ignore, Effect.andThen(Queue.shutdown(runtimeEventQueue))),
-  );
-
-  return {
-    provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: "in-session",
-    },
-    startSession,
-    sendTurn,
-    interruptTurn,
-    respondToRequest,
-    respondToUserInput,
-    stopSession,
-    listSessions,
-    hasSession,
-    readThread,
-    rollbackThread,
-    stopAll,
-    get streamEvents() {
-      return Stream.fromQueue(runtimeEventQueue);
-    },
-  } satisfies GeminiAdapterShape;
-});
+}
 
 export const GeminiAdapterLive = Layer.effect(GeminiAdapter, makeGeminiAdapter());
 

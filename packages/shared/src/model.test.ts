@@ -73,7 +73,6 @@ const gemini25Caps: ModelCapabilities = {
   reasoningEffortLevels: [
     { value: "-1", label: "Dynamic", isDefault: true },
     { value: "512", label: "512 Tokens" },
-    { value: "0", label: "Off" },
   ],
   supportsFastMode: false,
   supportsThinkingToggle: false,
@@ -283,7 +282,7 @@ describe("resolveApiModelId", () => {
         model: "gemini-2.5-flash",
         options: { thinkingBudget: 0 },
       }),
-    ).toBe("t3code-gemini-gemini-2-5-flash-thinking-budget-0");
+    ).toBe("gemini-2.5-flash");
   });
 });
 
@@ -369,7 +368,7 @@ describe("normalize*ModelOptionsWithCapabilities", () => {
         thinkingBudget: 0,
       }),
     ).toEqual({
-      thinkingBudget: 0,
+      thinkingBudget: -1,
     });
   });
 });
@@ -429,6 +428,11 @@ describe("Gemini helpers", () => {
     expect(
       getGeminiThinkingModelAlias("custom-model", {
         thinkingLevel: "HIGH",
+      }),
+    ).toBeNull();
+    expect(
+      getGeminiThinkingModelAlias("gemini-2.5-flash", {
+        thinkingBudget: 0,
       }),
     ).toBeNull();
   });

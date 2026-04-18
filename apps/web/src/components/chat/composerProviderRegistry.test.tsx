@@ -136,7 +136,6 @@ const GEMINI_MODELS: ReadonlyArray<ServerProviderModel> = [
       reasoningEffortLevels: [
         { value: "-1", label: "Dynamic", isDefault: true },
         { value: "512", label: "512 Tokens" },
-        { value: "0", label: "Off" },
       ],
       supportsFastMode: false,
       supportsThinkingToggle: false,
@@ -165,6 +164,21 @@ const OPENCODE_MODELS: ReadonlyArray<ServerProviderModel> = [
         { value: "build", label: "Build", isDefault: true },
         { value: "plan", label: "Plan" },
       ],
+    },
+  },
+];
+
+const FAST_MODE_ONLY_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "gpt-fast-only",
+    name: "GPT Fast Only",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
     },
   },
 ];
@@ -520,9 +534,9 @@ describe("getComposerProviderState", () => {
 
     expect(state).toEqual({
       provider: "gemini",
-      promptEffort: "0",
+      promptEffort: "-1",
       modelOptionsForDispatch: {
-        thinkingBudget: 0,
+        thinkingBudget: -1,
       },
     });
   });
@@ -643,5 +657,21 @@ describe("provider traits render guards", () => {
     });
 
     expect(content).toBeNull();
+  });
+
+  it("renders codex traits picker when fast mode is the only visible trait", () => {
+    const content = renderProviderTraitsPicker({
+      provider: "codex",
+      draftId: "draft_fast_mode_only" as DraftId,
+      model: "gpt-fast-only",
+      models: FAST_MODE_ONLY_MODELS,
+      modelOptions: {
+        fastMode: true,
+      },
+      prompt: "",
+      onPromptChange: () => {},
+    });
+
+    expect(content).not.toBeNull();
   });
 });

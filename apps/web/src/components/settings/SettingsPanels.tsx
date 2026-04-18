@@ -20,8 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
 import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
-import { normalizeModelSlug } from "@t3tools/shared/model";
-import { createModelSelection } from "@t3tools/shared/model";
+import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { Equal } from "effect";
 import { APP_VERSION } from "../../branding";
 import {
@@ -47,6 +46,7 @@ import {
   getCustomModelOptionsByProvider,
   resolveAppModelSelectionState,
 } from "../../modelSelection";
+import { formatAppModelOptionName } from "../../providerModelNames";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { useShallow } from "zustand/react/shallow";
 import {
@@ -780,7 +780,7 @@ export function GeneralSettingsPanel() {
       liveProvider?.models ??
       providerConfig.customModels.map((slug) => ({
         slug,
-        name: slug,
+        name: formatAppModelOptionName(providerSettings.provider, slug),
         isCustom: true,
         capabilities: null,
       }));

@@ -56,7 +56,6 @@ export const GEMINI_2_5_MODEL_CAPABILITIES: ModelCapabilities = {
   reasoningEffortLevels: [
     { value: "-1", label: "Dynamic", isDefault: true },
     { value: "512", label: "512 Tokens" },
-    { value: "0", label: "Off" },
   ],
   supportsFastMode: false,
   supportsThinkingToggle: false,
@@ -101,10 +100,14 @@ export function geminiCapabilitiesForModel(
   modelId: string | null | undefined,
   fallbackCapabilities: ModelCapabilities = DEFAULT_GEMINI_MODEL_CAPABILITIES,
 ): ModelCapabilities {
+  const trimmed = trimOrNull(modelId)?.toLowerCase();
   switch (getGeminiThinkingConfigKind(modelId)) {
     case "level":
       return GEMINI_3_MODEL_CAPABILITIES;
     case "budget":
+      if (!trimmed) {
+        return fallbackCapabilities;
+      }
       return GEMINI_2_5_MODEL_CAPABILITIES;
     default:
       return fallbackCapabilities;
@@ -172,13 +175,24 @@ export function getGeminiThinkingModelAlias(
     return null;
   }
 
-  const base = sanitizeGeminiAliasSegment(model);
-  if (kind === "level" && modelOptions.thinkingLevel) {
-    return `t3code-gemini-${base}-thinking-level-${modelOptions.thinkingLevel.toLowerCase()}`;
+  const caps = geminiCapabilitiesForModel(model);
+  const effort = getGeminiThinkingSelectionValue(caps, modelOptions);
+  if (!effort || !hasEffortLevel(caps, effort)) {
+    return null;
   }
-  if (kind === "budget" && modelOptions.thinkingBudget !== undefined) {
+
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return null;
+  }
+
+  const base = sanitizeGeminiAliasSegment(model);
+  if (kind === "level" && nextOptions.thinkingLevel) {
+    return `t3code-gemini-${base}-thinking-level-${nextOptions.thinkingLevel.toLowerCase()}`;
+  }
+  if (kind === "budget" && nextOptions.thinkingBudget !== undefined) {
     const budget =
-      modelOptions.thinkingBudget === -1 ? "dynamic" : String(modelOptions.thinkingBudget);
+      nextOptions.thinkingBudget === -1 ? "dynamic" : String(nextOptions.thinkingBudget);
     return `t3code-gemini-${base}-thinking-budget-${budget}`;
   }
   return null;

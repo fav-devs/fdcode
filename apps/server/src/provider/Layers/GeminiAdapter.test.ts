@@ -63,7 +63,7 @@ rl.on("line", (line) => {
 
   switch (message.method) {
     case "initialize":
-      reply(message.id, {});
+      reply(message.id, { protocolVersion: 1 });
       return;
     case "session/new":
       sessionCounter += 1;
@@ -206,17 +206,6 @@ describe("buildGeminiThinkingModelConfigAliases", () => {
           generateContentConfig: {
             thinkingConfig: {
               thinkingBudget: 512,
-            },
-          },
-        },
-      },
-      "t3code-gemini-gemini-2-5-flash-thinking-budget-0": {
-        extends: "chat-base-2.5",
-        modelConfig: {
-          model: "gemini-2.5-flash",
-          generateContentConfig: {
-            thinkingConfig: {
-              thinkingBudget: 0,
             },
           },
         },

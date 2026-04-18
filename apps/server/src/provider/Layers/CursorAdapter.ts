@@ -769,11 +769,15 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
+                        streamKind: event.streamKind,
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
                       }),
                     );
+                    return;
+                  case "UsageUpdated":
+                  case "ThreadMetadataUpdated":
                     return;
                 }
               }),
