@@ -43,7 +43,6 @@ describe("getProviderModelCapabilities", () => {
       reasoningEffortLevels: [
         { value: "-1", label: "Dynamic", isDefault: true },
         { value: "512", label: "512 Tokens" },
-        { value: "0", label: "Off" },
       ],
       supportsFastMode: false,
       supportsThinkingToggle: false,

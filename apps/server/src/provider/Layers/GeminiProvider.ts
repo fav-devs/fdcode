@@ -1,4 +1,5 @@
 import type { GeminiSettings, ServerProvider } from "@t3tools/contracts";
+import { formatGeminiModelDisplayName } from "@t3tools/shared/gemini";
 import { Duration, Effect, Equal, Layer, Option, Result, Stream } from "effect";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 
@@ -54,6 +55,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
     PROVIDER,
     geminiSettings.customModels,
     DEFAULT_GEMINI_MODEL_CAPABILITIES,
+    { formatCustomModelName: formatGeminiModelDisplayName },
   );
 
   if (!geminiSettings.enabled) {
@@ -133,23 +135,16 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
     });
   }
 
-  const capabilityProbeResult = yield* (resolveCapabilities ?? probeGeminiCapabilities)({
+  const capabilityProbe = yield* (resolveCapabilities ?? probeGeminiCapabilities)({
     binaryPath: geminiSettings.binaryPath,
     cwd: process.cwd(),
-  }).pipe(Effect.result);
-  const capabilityProbe: GeminiCapabilityProbeResult = Result.isFailure(capabilityProbeResult)
-    ? {
-        status: "warning",
-        auth: { status: "unknown" },
-        models: [],
-        message: `Gemini CLI is installed, but T3 Code could not verify authentication or discover models. ${capabilityProbeResult.failure instanceof Error ? capabilityProbeResult.failure.message : String(capabilityProbeResult.failure)}.`,
-      }
-    : capabilityProbeResult.success;
+  });
   const models = providerModelsFromSettings(
     capabilityProbe.models,
     PROVIDER,
     geminiSettings.customModels,
     DEFAULT_GEMINI_MODEL_CAPABILITIES,
+    { formatCustomModelName: formatGeminiModelDisplayName },
   );
 
   return buildServerProvider({
@@ -174,6 +169,7 @@ const makePendingGeminiProvider = (geminiSettings: GeminiSettings): ServerProvid
     PROVIDER,
     geminiSettings.customModels,
     DEFAULT_GEMINI_MODEL_CAPABILITIES,
+    { formatCustomModelName: formatGeminiModelDisplayName },
   );
 
   if (!geminiSettings.enabled) {
