@@ -1,6 +1,7 @@
 import {
   ServerSettings,
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
   type OpenCodeModelOptions,
@@ -83,28 +84,36 @@ export function applyServerSettingsPatch(
             model,
             ...withModelSelectionOptions(selectionPatch.options as CodexModelOptions | undefined),
           }
-        : provider === "claudeAgent"
+        : provider === "copilot"
           ? {
               provider,
               model,
               ...withModelSelectionOptions(
-                selectionPatch.options as ClaudeModelOptions | undefined,
+                selectionPatch.options as CopilotModelOptions | undefined,
               ),
             }
-          : provider === "cursor"
+          : provider === "claudeAgent"
             ? {
                 provider,
                 model,
                 ...withModelSelectionOptions(
-                  selectionPatch.options as CursorModelOptions | undefined,
+                  selectionPatch.options as ClaudeModelOptions | undefined,
                 ),
               }
-            : {
-                provider,
-                model,
-                ...withModelSelectionOptions(
-                  selectionPatch.options as OpenCodeModelOptions | undefined,
-                ),
-              },
+            : provider === "cursor"
+              ? {
+                  provider,
+                  model,
+                  ...withModelSelectionOptions(
+                    selectionPatch.options as CursorModelOptions | undefined,
+                  ),
+                }
+              : {
+                  provider,
+                  model,
+                  ...withModelSelectionOptions(
+                    selectionPatch.options as OpenCodeModelOptions | undefined,
+                  ),
+                },
   };
 }

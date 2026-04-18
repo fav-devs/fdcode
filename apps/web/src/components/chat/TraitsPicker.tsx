@@ -1,5 +1,6 @@
 import {
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
   type OpenCodeModelOptions,
@@ -61,6 +62,9 @@ function getRawEffort(
   if (provider === "codex") {
     return trimOrNull((modelOptions as CodexModelOptions | undefined)?.reasoningEffort);
   }
+  if (provider === "copilot") {
+    return trimOrNull((modelOptions as CopilotModelOptions | undefined)?.reasoningEffort);
+  }
   if (provider === "cursor") {
     return trimOrNull((modelOptions as CursorModelOptions | undefined)?.reasoning);
   }
@@ -72,6 +76,7 @@ function getRawEffort(
 
 function getEffortKey(provider: ProviderKind): string {
   if (provider === "codex") return "reasoningEffort";
+  if (provider === "copilot") return "reasoningEffort";
   if (provider === "cursor") return "reasoning";
   if (provider === "opencode") return "variant";
   return "effort";

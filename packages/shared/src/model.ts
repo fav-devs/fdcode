@@ -3,6 +3,7 @@ import {
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ClaudeAgentEffort,
   type ClaudeModelOptions,
+  type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
   type ModelCapabilities,
@@ -90,6 +91,17 @@ export function normalizeCodexModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeCopilotModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: CopilotModelOptions | null | undefined,
+): CopilotModelOptions | undefined {
+  const reasoningEffort = resolveEffort(caps, modelOptions?.reasoningEffort);
+  const nextOptions: CopilotModelOptions = reasoningEffort
+    ? { reasoningEffort: reasoningEffort as CopilotModelOptions["reasoningEffort"] }
+    : {};
+  return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
+}
+
 export function normalizeClaudeModelOptionsWithCapabilities(
   caps: ModelCapabilities,
   modelOptions: ClaudeModelOptions | null | undefined,
@@ -158,6 +170,11 @@ export function normalizeProviderModelOptionsWithCapabilities(
   switch (provider) {
     case "codex":
       return normalizeCodexModelOptionsWithCapabilities(caps, modelOptions as CodexModelOptions);
+    case "copilot":
+      return normalizeCopilotModelOptionsWithCapabilities(
+        caps,
+        modelOptions as CopilotModelOptions,
+      );
     case "claudeAgent":
       return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
     case "cursor":
@@ -260,6 +277,12 @@ export function createModelSelection(
         provider,
         model,
         ...(options ? { options: options as CodexModelOptions } : {}),
+      };
+    case "copilot":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as CopilotModelOptions } : {}),
       };
     case "claudeAgent":
       return {

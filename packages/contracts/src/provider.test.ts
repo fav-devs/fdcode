@@ -88,6 +88,25 @@ describe("ProviderSessionStartInput", () => {
       expect(parsed.modelSelection.options?.fastMode).toBe(true);
     }
   });
+
+  it("accepts copilot provider", () => {
+    const parsed = decodeProviderSessionStartInput({
+      threadId: "thread-1",
+      provider: "copilot",
+      cwd: "/tmp/workspace",
+      runtimeMode: "full-access",
+      modelSelection: {
+        provider: "copilot",
+        model: "gpt-4.1",
+        options: { reasoningEffort: "high" },
+      },
+    });
+    expect(parsed.provider).toBe("copilot");
+    expect(parsed.modelSelection?.provider).toBe("copilot");
+    if (parsed.modelSelection?.provider === "copilot") {
+      expect(parsed.modelSelection.options?.reasoningEffort).toBe("high");
+    }
+  });
 });
 
 describe("ProviderSendTurnInput", () => {
@@ -132,5 +151,24 @@ describe("ProviderSendTurnInput", () => {
     }
     expect(parsed.modelSelection.options?.effort).toBe("ultrathink");
     expect(parsed.modelSelection.options?.fastMode).toBe(true);
+  });
+
+  it("accepts copilot modelSelection", () => {
+    const parsed = decodeProviderSendTurnInput({
+      threadId: "thread-1",
+      modelSelection: {
+        provider: "copilot",
+        model: "gpt-4.1",
+        options: {
+          reasoningEffort: "xhigh",
+        },
+      },
+    });
+
+    expect(parsed.modelSelection?.provider).toBe("copilot");
+    if (parsed.modelSelection?.provider !== "copilot") {
+      throw new Error("Expected copilot modelSelection");
+    }
+    expect(parsed.modelSelection.options?.reasoningEffort).toBe("xhigh");
   });
 });
