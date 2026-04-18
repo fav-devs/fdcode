@@ -84,8 +84,6 @@ import { asArray, asNumber, asRecord, trimToUndefined } from "../jsonValue.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "gemini" as const;
-const GEMINI_ACP_REQUEST_TIMEOUT_MS = 60_000;
-const GEMINI_ACP_PROMPT_TIMEOUT_MS = 30 * 60_000;
 const GEMINI_TMP_DIR = path.join(os.homedir(), ".gemini", "tmp");
 const GEMINI_CHAT_DIR_NAME = "chats";
 const GEMINI_SESSION_FILE_PREFIX = "session-";
@@ -233,21 +231,9 @@ export function buildGeminiThinkingModelConfigAliases(
   return aliases;
 }
 
-export function geminiRequestTimeoutMs(method: string): number {
-  return method === "session/prompt" ? GEMINI_ACP_PROMPT_TIMEOUT_MS : GEMINI_ACP_REQUEST_TIMEOUT_MS;
-}
-
 function readResumeSessionId(resumeCursor: unknown): string | undefined {
   const record = asRecord(resumeCursor);
   return trimToUndefined(record?.sessionId);
-}
-
-export function resolveStartedGeminiSessionId(
-  requestedResumeSessionId: string | undefined,
-  startResponse: unknown,
-): string | undefined {
-  const resolvedSessionId = trimToUndefined(asRecord(startResponse)?.sessionId);
-  return resolvedSessionId ?? requestedResumeSessionId;
 }
 
 function cloneUnknownArray(items: ReadonlyArray<unknown>): Array<unknown> {
@@ -463,7 +449,9 @@ function permissionOutcomeFromGeminiOptions(
   }
 
   const pick = (...kinds: ReadonlyArray<EffectAcpSchema.PermissionOptionKind>) =>
-    options.find((option) => kinds.includes(option.kind));
+    kinds
+      .map((kind) => options.find((option) => option.kind === kind))
+      .find((option) => option !== undefined);
 
   const selected =
     decision === "acceptForSession"
@@ -566,10 +554,6 @@ function settlePendingApprovalsAsCancelled(
       discard: true,
     },
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
@@ -1342,14 +1326,13 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
         }
 
         const response = promptResult.success;
+        const responseRecord = asRecord(response);
         const stopReason =
-          isRecord(response) && typeof response.stopReason === "string"
-            ? response.stopReason
-            : null;
+          typeof responseRecord?.stopReason === "string" ? responseRecord.stopReason : null;
         yield* finishTurn(context, {
           state: stopReason === "cancelled" ? "cancelled" : "completed",
           stopReason,
-          usage: isRecord(response) ? response.usage : undefined,
+          usage: responseRecord?.usage,
         });
       });
 
