@@ -9,6 +9,7 @@ import {
   hasEffortLevel,
   isClaudeUltrathinkPrompt,
   normalizeClaudeModelOptionsWithCapabilities,
+  normalizeCopilotModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
   normalizeModelSlug,
   resolveContextWindow,
@@ -44,9 +45,23 @@ const claudeCaps: ModelCapabilities = {
   promptInjectedEffortLevels: ["ultrathink"],
 };
 
+const copilotCaps: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High", isDefault: true },
+    { value: "xhigh", label: "Extra High" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
 describe("normalizeModelSlug", () => {
   it("maps known aliases to canonical slugs", () => {
     expect(normalizeModelSlug("gpt-5-codex")).toBe("gpt-5.4");
+    expect(normalizeModelSlug("4.1", "copilot")).toBe("gpt-4.1");
     expect(normalizeModelSlug("5.3")).toBe("gpt-5.3-codex");
     expect(normalizeModelSlug("sonnet", "claudeAgent")).toBe("claude-sonnet-4-6");
   });
@@ -226,6 +241,24 @@ describe("normalize*ModelOptionsWithCapabilities", () => {
     ).toEqual({
       effort: "high",
       contextWindow: "200k",
+    });
+  });
+
+  it("normalizes copilot reasoning effort against model capabilities", () => {
+    expect(
+      normalizeCopilotModelOptionsWithCapabilities(copilotCaps, {
+        reasoningEffort: "xhigh",
+      }),
+    ).toEqual({
+      reasoningEffort: "xhigh",
+    });
+
+    expect(
+      normalizeCopilotModelOptionsWithCapabilities(copilotCaps, {
+        reasoningEffort: "bogus" as never,
+      }),
+    ).toEqual({
+      reasoningEffort: "high",
     });
   });
 
