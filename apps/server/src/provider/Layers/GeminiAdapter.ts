@@ -848,14 +848,21 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
       event: Extract<AcpParsedSessionEvent, { readonly _tag: "ContentDelta" }>,
     ) =>
       Effect.gen(function* () {
-        if (!context.turnState || event.text.length === 0) {
+        const turnState = context.turnState;
+        if (!turnState || event.text.length === 0) {
           return;
         }
 
+        let activeTurnState = turnState;
         let itemId = event.itemId;
         if (event.streamKind === "reasoning_text") {
           yield* emitReasoningItemStarted(context);
-          itemId = context.turnState.reasoningItemId;
+          const nextTurnState = context.turnState;
+          if (!nextTurnState || nextTurnState.turnId !== turnState.turnId) {
+            return;
+          }
+          activeTurnState = nextTurnState;
+          itemId = activeTurnState.reasoningItemId;
         }
         if (!itemId) {
           return;
@@ -863,7 +870,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
 
         const itemType =
           event.streamKind === "assistant_text" ? "assistant_message" : ("reasoning" as const);
-        const existing = upsertGeminiTurnItem(context.turnState, itemId, itemType, {});
+        const existing = upsertGeminiTurnItem(activeTurnState, itemId, itemType, {});
         existing.text = `${existing.text ?? ""}${event.text}`;
 
         yield* offerRuntimeEvent(
@@ -871,7 +878,7 @@ function makeGeminiAdapter(options?: GeminiAdapterLiveOptions) {
             stamp: makeEventStamp(),
             provider: PROVIDER,
             threadId: context.threadId,
-            turnId: context.turnState.turnId,
+            turnId: activeTurnState.turnId,
             streamKind: event.streamKind,
             itemId,
             text: event.text,
