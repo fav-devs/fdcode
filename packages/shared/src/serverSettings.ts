@@ -2,6 +2,7 @@ import {
   ServerSettings,
   type ClaudeModelOptions,
   type CodexModelOptions,
+  type CursorModelOptions,
   type GeminiModelOptions,
   type ModelSelection,
   type OpenCodeModelOptions,
@@ -78,33 +79,30 @@ export function applyServerSettingsPatch(
   return {
     ...next,
     textGenerationModelSelection: (() => {
-      const provider = selectionPatch.provider ?? current.textGenerationModelSelection.provider;
-      const model = selectionPatch.model ?? current.textGenerationModelSelection.model;
-
       switch (provider) {
         case "codex":
           return {
             provider,
             model,
-            ...(selectionPatch.options
-              ? { options: selectionPatch.options as CodexModelOptions }
-              : {}),
+            ...withModelSelectionOptions(selectionPatch.options as CodexModelOptions | undefined),
           } satisfies ModelSelection;
         case "claudeAgent":
           return {
             provider,
             model,
-            ...(selectionPatch.options
-              ? { options: selectionPatch.options as ClaudeModelOptions }
-              : {}),
+            ...withModelSelectionOptions(selectionPatch.options as ClaudeModelOptions | undefined),
+          } satisfies ModelSelection;
+        case "cursor":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(selectionPatch.options as CursorModelOptions | undefined),
           } satisfies ModelSelection;
         case "gemini":
           return {
             provider,
             model,
-            ...(selectionPatch.options
-              ? { options: selectionPatch.options as GeminiModelOptions }
-              : {}),
+            ...withModelSelectionOptions(selectionPatch.options as GeminiModelOptions | undefined),
           } satisfies ModelSelection;
         case "opencode":
           return {

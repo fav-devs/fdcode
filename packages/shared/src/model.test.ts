@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODEL_BY_PROVIDER, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type GeminiModelOptions,
+  type ModelCapabilities,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
@@ -15,14 +19,14 @@ import {
   hasContextWindowOption,
   hasEffortLevel,
   isClaudeUltrathinkPrompt,
+  mergeGeminiModelOptions,
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
   normalizeGeminiModelOptionsWithCapabilities,
   normalizeModelSlug,
-  resolveApiModelId,
   resolveContextWindow,
   resolveEffort,
-  resolveModelSlug,
+  resolveApiModelId,
   resolveModelSlugForProvider,
   resolveSelectableModel,
   trimOrNull,
@@ -92,17 +96,18 @@ describe("normalizeModelSlug", () => {
   });
 });
 
-describe("resolveModelSlug", () => {
+describe("resolveModelSlugForProvider", () => {
   it("returns defaults when the model is missing", () => {
-    expect(resolveModelSlug(undefined, "codex")).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
-
+    expect(resolveModelSlugForProvider("codex", undefined)).toBe(DEFAULT_MODEL_BY_PROVIDER.codex);
     expect(resolveModelSlugForProvider("claudeAgent", undefined)).toBe(
       DEFAULT_MODEL_BY_PROVIDER.claudeAgent,
     );
   });
 
   it("preserves normalized unknown models", () => {
-    expect(resolveModelSlug("custom/internal-model", "codex")).toBe("custom/internal-model");
+    expect(resolveModelSlugForProvider("codex", "custom/internal-model")).toBe(
+      "custom/internal-model",
+    );
   });
 });
 
@@ -168,6 +173,7 @@ describe("resolveEffort", () => {
 
 describe("misc helpers", () => {
   it("detects ultrathink prompts", () => {
+    expect(isClaudeUltrathinkPrompt("Please ultrathink about this")).toBe(true);
     expect(isClaudeUltrathinkPrompt("Ultrathink:\nInvestigate")).toBe(true);
     expect(isClaudeUltrathinkPrompt("Investigate")).toBe(false);
   });
@@ -381,6 +387,32 @@ describe("Gemini helpers", () => {
     expect(geminiModelOptionsFromEffortValue("HIGH")).toEqual({ thinkingLevel: "HIGH" });
     expect(geminiModelOptionsFromEffortValue("512")).toEqual({ thinkingBudget: 512 });
     expect(geminiModelOptionsFromEffortValue("bogus")).toBeUndefined();
+  });
+
+  it("merges Gemini model options while clearing incompatible thinking fields", () => {
+    expect(
+      mergeGeminiModelOptions(
+        {
+          thinkingBudget: 0,
+        },
+        { thinkingLevel: "LOW" },
+      ),
+    ).toEqual({
+      thinkingLevel: "LOW",
+    });
+
+    expect(
+      mergeGeminiModelOptions(
+        {
+          thinkingLevel: "HIGH",
+          keepFutureOption: true,
+        } as GeminiModelOptions,
+        { thinkingBudget: 512 },
+      ),
+    ).toMatchObject({
+      thinkingBudget: 512,
+      keepFutureOption: true,
+    });
   });
 
   it("builds Gemini thinking aliases only for matching model families", () => {
