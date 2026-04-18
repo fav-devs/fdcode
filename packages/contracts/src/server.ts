@@ -81,6 +81,28 @@ export const ServerProviderSkill = Schema.Struct({
 });
 export type ServerProviderSkill = typeof ServerProviderSkill.Type;
 
+const ServerProviderUsagePercent = Schema.Number.check(Schema.isGreaterThanOrEqualTo(0)).check(
+  Schema.isLessThanOrEqualTo(100),
+);
+
+export const ServerProviderUsageWindow = Schema.Struct({
+  kind: Schema.Literals(["session", "weekly"]),
+  label: TrimmedNonEmptyString,
+  usedPercent: ServerProviderUsagePercent,
+  resetsAt: Schema.optional(IsoDateTime),
+  windowDurationMins: Schema.optional(NonNegativeInt),
+});
+export type ServerProviderUsageWindow = typeof ServerProviderUsageWindow.Type;
+
+export const ServerProviderUsageLimits = Schema.Struct({
+  source: Schema.Literals(["codexAppServer", "claudeStatusProbe", "cursorAcp", "opencodeManaged"]),
+  available: Schema.Boolean,
+  reason: Schema.optional(TrimmedNonEmptyString),
+  windows: Schema.Array(ServerProviderUsageWindow),
+  checkedAt: IsoDateTime,
+});
+export type ServerProviderUsageLimits = typeof ServerProviderUsageLimits.Type;
+
 export const ServerProvider = Schema.Struct({
   provider: ProviderKind,
   enabled: Schema.Boolean,
@@ -95,6 +117,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  usageLimits: Schema.optional(ServerProviderUsageLimits),
 });
 export type ServerProvider = typeof ServerProvider.Type;
 
@@ -205,7 +228,6 @@ export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Typ
 export const ServerLifecycleWelcomePayload = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
   cwd: TrimmedNonEmptyString,
-  homeDir: Schema.optional(TrimmedNonEmptyString),
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
@@ -233,21 +255,6 @@ export const ServerLifecycleStreamEvent = Schema.Union([
   ServerLifecycleStreamReadyEvent,
 ]);
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
-
-export const ServerResourceStatsPayload = Schema.Struct({
-  cpuLoad1m: Schema.Number,
-  cpuCount: Schema.Number,
-  memoryUsedBytes: Schema.Number,
-  memoryTotalBytes: Schema.Number,
-});
-export type ServerResourceStatsPayload = typeof ServerResourceStatsPayload.Type;
-
-export const ServerResourceStatsEvent = Schema.Struct({
-  version: Schema.Literal(1),
-  type: Schema.Literal("snapshot"),
-  payload: ServerResourceStatsPayload,
-});
-export type ServerResourceStatsEvent = typeof ServerResourceStatsEvent.Type;
 
 export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
