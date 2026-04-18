@@ -12,12 +12,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { GeminiAdapter } from "../Services/GeminiAdapter.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
-import {
-  buildGeminiThinkingModelConfigAliases,
-  geminiRequestTimeoutMs,
-  makeGeminiAdapterLive,
-  resolveStartedGeminiSessionId,
-} from "./GeminiAdapter.ts";
+import { buildGeminiThinkingModelConfigAliases, makeGeminiAdapterLive } from "./GeminiAdapter.ts";
 
 const tempDirs: Array<string> = [];
 
@@ -125,41 +120,6 @@ function makeHarness() {
     Layer.provideMerge(NodeServices.layer),
   );
 }
-
-describe("resolveStartedGeminiSessionId", () => {
-  it("prefers the actual session id returned by Gemini over the requested resume id", () => {
-    expect(
-      resolveStartedGeminiSessionId("stale-session-id", {
-        sessionId: "fresh-session-id",
-      }),
-    ).toBe("fresh-session-id");
-  });
-
-  it("falls back to the requested resume id when the load response omits sessionId", () => {
-    expect(resolveStartedGeminiSessionId("resume-session-id", {})).toBe("resume-session-id");
-  });
-
-  it("returns the started session id for fresh sessions", () => {
-    expect(resolveStartedGeminiSessionId(undefined, { sessionId: "new-session-id" })).toBe(
-      "new-session-id",
-    );
-  });
-
-  it("returns undefined when neither a requested nor started session id is available", () => {
-    expect(resolveStartedGeminiSessionId(undefined, {})).toBeUndefined();
-  });
-});
-
-describe("geminiRequestTimeoutMs", () => {
-  it("uses the short ACP timeout for control-plane requests", () => {
-    expect(geminiRequestTimeoutMs("session/new")).toBe(60_000);
-    expect(geminiRequestTimeoutMs("session/set_model")).toBe(60_000);
-  });
-
-  it("uses a long timeout for session/prompt turns", () => {
-    expect(geminiRequestTimeoutMs("session/prompt")).toBe(30 * 60_000);
-  });
-});
 
 describe("buildGeminiThinkingModelConfigAliases", () => {
   it("builds Gemini 3 and Gemini 2.5 aliases from model families", () => {

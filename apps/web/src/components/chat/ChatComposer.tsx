@@ -48,7 +48,6 @@ import {
   useComposerThreadDraft,
   useEffectiveComposerModelState,
 } from "../../composerDraftStore";
-import { buildModelSelection } from "../../modelSelection";
 import {
   type TerminalContextDraft,
   type TerminalContextSelection,
