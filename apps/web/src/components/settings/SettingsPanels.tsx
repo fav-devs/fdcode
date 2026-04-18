@@ -54,7 +54,11 @@ import {
   selectThreadShellsAcrossEnvironments,
   useStore,
 } from "../../store";
-import { formatRelativeTime, formatRelativeTimeLabel } from "../../timestampFormat";
+import {
+  formatRelativeTime,
+  formatRelativeTimeLabel,
+  formatRelativeTimeUntilLabel,
+} from "../../timestampFormat";
 import { cn } from "../../lib/utils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -246,6 +250,113 @@ function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }
   );
 }
 
+function getUsageMeterToneClass(usedPercent: number): string {
+  if (usedPercent >= 90) return "bg-destructive";
+  if (usedPercent >= 70) return "bg-warning";
+  return "bg-foreground/88";
+}
+
+function getUsageRemainingLabel(usedPercent: number): string {
+  const remainingPercent = Math.max(0, Math.min(100, 100 - Math.round(usedPercent)));
+  return `${remainingPercent}% remaining`;
+}
+
+function getUsageTrackClass(usedPercent: number): string {
+  if (usedPercent >= 90) return "bg-destructive/12";
+  if (usedPercent >= 70) return "bg-warning/12";
+  return "bg-black/5 dark:bg-white/6";
+}
+
+function getUsageResetLabel(resetsAt: string | undefined): string | null {
+  if (!resetsAt) return null;
+  const diffMs = new Date(resetsAt).getTime() - Date.now();
+  if (!Number.isFinite(diffMs) || diffMs <= 0) {
+    return null;
+  }
+  const dayMs = 24 * 60 * 60 * 1000;
+  if (diffMs >= dayMs && diffMs < dayMs * 2) {
+    return "Resets tomorrow";
+  }
+  const relativeLabel = formatRelativeTimeUntilLabel(resetsAt);
+  if (relativeLabel === "Soon") {
+    return "Resets soon";
+  }
+  return `Resets in ${relativeLabel.replace(/ left$/, "")}`;
+}
+
+function ProviderUsageLimitsBlock({ provider }: { provider: ServerProvider | undefined }) {
+  useRelativeTimeTick();
+
+  if (!provider || !provider.enabled || !provider.installed || !provider.usageLimits) {
+    return null;
+  }
+
+  if (!provider.usageLimits.available) {
+    return (
+      <p className="pt-2 text-[11px] text-muted-foreground/85">
+        {provider.usageLimits.reason ?? "Usage limits unavailable for this account"}
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-4 pt-3">
+      {provider.usageLimits.windows.map((window) => {
+        const percentageLabel = `${Math.round(window.usedPercent)}%`;
+        const resetLabel = getUsageResetLabel(window.resetsAt);
+        const normalizedWidth = Math.max(0, Math.min(100, window.usedPercent));
+        const remainingLabel = getUsageRemainingLabel(window.usedPercent);
+
+        return (
+          <div
+            key={`${window.kind}-${window.windowDurationMins ?? "na"}-${window.resetsAt ?? "na"}`}
+            className="space-y-1.5"
+          >
+            <div className="flex items-center justify-between gap-3 text-[11px]">
+              <span className="font-medium tracking-[0.01em] text-foreground/92">
+                {window.label} limit
+              </span>
+              <span className="text-muted-foreground/85">{remainingLabel}</span>
+            </div>
+            <div
+              className={cn(
+                "h-1.5 overflow-hidden rounded-full",
+                getUsageTrackClass(window.usedPercent),
+              )}
+            >
+              <div
+                className={cn(
+                  "h-full rounded-full transition-[width,background-color]",
+                  getUsageMeterToneClass(window.usedPercent),
+                )}
+                style={{ width: `${normalizedWidth}%` }}
+                aria-label={`${window.label} usage ${percentageLabel}`}
+              />
+            </div>
+            {resetLabel ? (
+              <p className="text-[11px] text-muted-foreground/72">{resetLabel}</p>
+            ) : null}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProviderCardShell({ children, expanded }: { children: ReactNode; expanded: boolean }) {
+  return (
+    <div
+      className={cn(
+        "relative overflow-hidden border-t border-border/70 bg-[linear-gradient(180deg,rgba(15,23,42,0.02),rgba(15,23,42,0.008))] first:border-t-0 dark:border-white/8 dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.028),rgba(255,255,255,0.01))]",
+        expanded &&
+          "bg-[linear-gradient(180deg,rgba(15,23,42,0.045),rgba(15,23,42,0.018))] dark:bg-[linear-gradient(180deg,rgba(255,255,255,0.04),rgba(255,255,255,0.016))]",
+      )}
+    >
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-black/6 dark:bg-white/5" />
+      {children}
+    </div>
+  );
+}
 function AboutVersionTitle() {
   return (
     <span className="inline-flex items-center gap-2">
@@ -1209,6 +1320,7 @@ export function GeneralSettingsPanel() {
                       {providerCard.summary.headline}
                       {providerCard.summary.detail ? ` - ${providerCard.summary.detail}` : null}
                     </p>
+                    <ProviderUsageLimitsBlock provider={providerCard.liveProvider} />
                   </div>
                   <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
                     <Button
