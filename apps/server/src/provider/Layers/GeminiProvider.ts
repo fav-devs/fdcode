@@ -17,6 +17,7 @@ import {
   probeGeminiCapabilities,
   type GeminiCapabilityProbeResult,
 } from "../geminiAcpProbe.ts";
+import { resolveGeminiBinaryPath } from "../geminiBinaryPath.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { GeminiProvider } from "../Services/GeminiProvider.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
@@ -29,10 +30,11 @@ const runGeminiCommand = Effect.fn("runGeminiCommand")(function* (args: Readonly
   const geminiSettings = yield* serverSettings.getSettings.pipe(
     Effect.map((settings) => settings.providers.gemini),
   );
-  const command = ChildProcess.make(geminiSettings.binaryPath, [...args], {
+  const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
+  const command = ChildProcess.make(binaryPath, [...args], {
     shell: process.platform === "win32",
   });
-  return yield* spawnAndCollect(geminiSettings.binaryPath, command);
+  return yield* spawnAndCollect(binaryPath, command);
 });
 
 export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(function* (
@@ -74,6 +76,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
     });
   }
 
+  const binaryPath = resolveGeminiBinaryPath(geminiSettings.binaryPath);
   const versionProbe = yield* runGeminiCommand(["--version"]).pipe(
     Effect.timeoutOption(DEFAULT_TIMEOUT_MS),
     Effect.result,
@@ -136,7 +139,7 @@ export const checkGeminiProviderStatus = Effect.fn("checkGeminiProviderStatus")(
   }
 
   const capabilityProbe = yield* (resolveCapabilities ?? probeGeminiCapabilities)({
-    binaryPath: geminiSettings.binaryPath,
+    binaryPath,
     cwd: process.cwd(),
   });
   const models = providerModelsFromSettings(

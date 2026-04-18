@@ -4,6 +4,7 @@ import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { GeminiModelSelection, TextGenerationError } from "@t3tools/contracts";
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 
+import { resolveGeminiBinaryPath } from "../../provider/geminiBinaryPath.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { type TextGenerationShape, TextGeneration } from "../Services/TextGeneration.ts";
 import {
@@ -70,8 +71,9 @@ const makeGeminiTextGeneration = Effect.gen(function* () {
     ).pipe(Effect.catch(() => Effect.undefined));
 
     const runGeminiCommand = Effect.fn("runGeminiJson.runGeminiCommand")(function* () {
+      const binaryPath = resolveGeminiBinaryPath(geminiSettings?.binaryPath);
       const command = ChildProcess.make(
-        geminiSettings?.binaryPath || "gemini",
+        binaryPath,
         [
           "--prompt",
           "",

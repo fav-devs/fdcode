@@ -32,13 +32,17 @@ function mockHandle(result: { stdout: string; stderr: string; code: number }) {
 }
 
 function mockSpawnerLayer(
-  handler: (args: ReadonlyArray<string>) => { stdout: string; stderr: string; code: number },
+  handler: (input: { command: string; args: ReadonlyArray<string> }) => {
+    stdout: string;
+    stderr: string;
+    code: number;
+  },
 ) {
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) => {
-      const cmd = command as unknown as { args: ReadonlyArray<string> };
-      return Effect.succeed(mockHandle(handler(cmd.args)));
+      const cmd = command as unknown as { command: string; args: ReadonlyArray<string> };
+      return Effect.succeed(mockHandle(handler({ command: cmd.command, args: cmd.args })));
     }),
   );
 }
@@ -108,6 +112,48 @@ describe("parseGeminiAcpProbeError", () => {
 });
 
 describe("checkGeminiProviderStatus", () => {
+  it.effect("falls back to the system gemini binary when the configured path is blank", () => {
+    const commands: string[] = [];
+    const probedBinaryPaths: string[] = [];
+
+    return Effect.gen(function* () {
+      const status = yield* checkGeminiProviderStatus((input) => {
+        probedBinaryPaths.push(input.binaryPath);
+        return Effect.succeed({
+          status: "ready" as const,
+          auth: { status: "authenticated" as const },
+          message: "Gemini CLI is installed and authenticated.",
+          models: [],
+        });
+      });
+
+      assert.strictEqual(status.provider, "gemini");
+      assert.strictEqual(status.status, "ready");
+      assert.deepStrictEqual(commands, ["gemini"]);
+      assert.deepStrictEqual(probedBinaryPaths, ["gemini"]);
+    }).pipe(
+      Effect.provide(
+        Layer.mergeAll(
+          ServerSettingsService.layerTest({
+            providers: {
+              gemini: {
+                binaryPath: "",
+              },
+            },
+          }),
+          mockSpawnerLayer(({ command, args }) => {
+            commands.push(command);
+            const joined = args.join(" ");
+            if (joined === "--version") {
+              return { stdout: "gemini 0.37.1\n", stderr: "", code: 0 };
+            }
+            throw new Error(`Unexpected args: ${joined}`);
+          }),
+        ),
+      ),
+    );
+  });
+
   it.effect("publishes Gemini models discovered from ACP and merges custom models", () =>
     Effect.gen(function* () {
       const status = yield* checkGeminiProviderStatus(() =>
@@ -149,7 +195,7 @@ describe("checkGeminiProviderStatus", () => {
               },
             },
           }),
-          mockSpawnerLayer((args) => {
+          mockSpawnerLayer(({ args }) => {
             const joined = args.join(" ");
             if (joined === "--version") {
               return { stdout: "gemini 0.37.1\n", stderr: "", code: 0 };
@@ -182,7 +228,7 @@ describe("checkGeminiProviderStatus", () => {
         Effect.provide(
           Layer.mergeAll(
             ServerSettingsService.layerTest(),
-            mockSpawnerLayer((args) => {
+            mockSpawnerLayer(({ args }) => {
               const joined = args.join(" ");
               if (joined === "--version") {
                 return { stdout: "gemini 0.37.1\n", stderr: "", code: 0 };
