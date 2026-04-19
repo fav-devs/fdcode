@@ -72,20 +72,22 @@ export const ChatHeader = memo(function ChatHeader({
     <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden sm:flex-1 sm:flex-nowrap sm:gap-3">
         <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
-        <h2
-          className="min-w-0 flex-1 basis-40 truncate text-[15px] font-semibold tracking-tight text-foreground"
-          title={activeThreadTitle}
-        >
-          {activeThreadTitle}
-        </h2>
-        {activeProjectName && (
-          <Badge
-            variant="outline"
-            className="min-w-0 max-w-full shrink overflow-hidden sm:max-w-56"
+        <div className="flex min-w-0 flex-1 basis-40 items-baseline gap-2 overflow-hidden">
+          <h2
+            className="min-w-0 shrink-0 truncate text-[15px] font-semibold tracking-tight text-foreground"
+            title={activeThreadTitle}
           >
-            <span className="min-w-0 truncate">{activeProjectName}</span>
-          </Badge>
-        )}
+            {activeThreadTitle}
+          </h2>
+          {activeProjectName && (
+            <span
+              className="min-w-0 truncate text-[13px] text-muted-foreground/60"
+              title={activeProjectName}
+            >
+              {activeProjectName}
+            </span>
+          )}
+        </div>
         {activeProjectName && !isGitRepo && (
           <Badge variant="outline" className="shrink-0 text-[10px] text-amber-700">
             No Git
