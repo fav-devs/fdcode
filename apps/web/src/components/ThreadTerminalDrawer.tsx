@@ -1065,7 +1065,7 @@ export default function ThreadTerminalDrawer({
       />
 
       {!hasTerminalSidebar && (
-        <div className="pointer-events-none absolute right-2 top-2 z-20">
+        <div className="pointer-events-none absolute right-2 top-[30px] z-20">
           <div className="pointer-events-auto inline-flex items-center overflow-hidden rounded-md border border-border/80 bg-background/70">
             <TerminalActionButton
               className={`p-1 text-foreground/90 transition-colors ${
