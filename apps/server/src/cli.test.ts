@@ -171,6 +171,54 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
     }),
   );
 
+  it.effect("reports daemon status when no detached daemon is running", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-daemon-status-empty-"));
+      const { output } = yield* captureStdout(
+        runCli(["daemon", "status", "--base-dir", baseDir, "--json"]),
+      );
+      const parsed = JSON.parse(output) as {
+        readonly status: string;
+        readonly pid: number | null;
+        readonly logPath: string;
+      };
+
+      assert.equal(parsed.status, "not-running");
+      assert.equal(parsed.pid, null);
+      assert.equal(parsed.logPath.endsWith("/logs/server.log"), true);
+    }),
+  );
+
+  it.effect("reports daemon status as running when the persisted pid is alive", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-daemon-status-running-"));
+      const config = yield* makeCliTestServerConfig(baseDir);
+      yield* persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: {
+          ...makePersistedServerRuntimeState({
+            config,
+            port: 3773,
+          }),
+          pid: process.pid,
+        },
+      }).pipe(Effect.provide(NodeServices.layer));
+
+      const { output } = yield* captureStdout(
+        runCli(["daemon", "status", "--base-dir", baseDir, "--json"]),
+      );
+      const parsed = JSON.parse(output) as {
+        readonly status: string;
+        readonly pid: number | null;
+        readonly origin: string | null;
+      };
+
+      assert.equal(parsed.status, "running");
+      assert.equal(parsed.pid, process.pid);
+      assert.equal(parsed.origin, "http://127.0.0.1:3773");
+    }),
+  );
+
   it.effect("executes auth pairing subcommands and redacts secrets from list output", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-auth-pairing-test-"));
