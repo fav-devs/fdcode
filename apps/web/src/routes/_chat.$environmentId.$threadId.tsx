@@ -40,6 +40,7 @@ import {
   resolveRoutePanelState,
   type ThreadRouteSearch,
 } from "./-chatThreadRoute.logic";
+import { useWorkspaceStore } from "../workspace/store";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const RIGHT_PANEL_SIDEBAR_WIDTH_STORAGE_KEY = "chat_right_panel_sidebar_width";
@@ -293,6 +294,7 @@ const RightPanelInlineSidebar = (props: {
 
 function ChatThreadRouteView() {
   const navigate = useNavigate();
+  const openThreadSurface = useWorkspaceStore((state) => state.openThreadSurface);
   const threadRef = Route.useParams({
     select: (params) => resolveThreadRouteRef(params),
   });
@@ -495,6 +497,20 @@ function ChatThreadRouteView() {
       void navigate({ to: "/", replace: true });
     }
   }, [bootstrapComplete, environmentHasAnyThreads, navigate, routeThreadExists, threadRef]);
+
+  useEffect(() => {
+    if (!threadRef || !bootstrapComplete || !routeThreadExists) {
+      return;
+    }
+
+    openThreadSurface(
+      {
+        scope: "server",
+        threadRef,
+      },
+      "focus-or-replace",
+    );
+  }, [bootstrapComplete, openThreadSurface, routeThreadExists, threadRef]);
 
   useEffect(() => {
     if (!threadRef || !serverThreadStarted || !draftThread?.promotedTo) return;

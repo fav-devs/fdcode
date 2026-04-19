@@ -876,6 +876,7 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
+  isFocused: () => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -1369,7 +1370,6 @@ function ComposerSurroundSelectionPlugin(props: {
     const onCompositionEnd = () => {
       tryApplyDeadKeyBacktickSurround({ finalAttempt: true });
     };
-
     let activeRootElement: HTMLElement | null = null;
     const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
       prevRootElement?.removeEventListener("keydown", onKeyDown);
@@ -1479,7 +1479,7 @@ function ComposerPromptEditorInner({
       if (shouldRewriteEditorState) {
         $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
       }
-      if (shouldRewriteEditorState || isFocused) {
+      if (isFocused) {
         $setSelectionAtComposerOffset(normalizedCursor);
       }
     });
@@ -1494,8 +1494,12 @@ function ComposerPromptEditorInner({
       if (!rootElement) return;
       const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
       rootElement.focus();
+      isApplyingControlledUpdateRef.current = true;
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);
+      });
+      queueMicrotask(() => {
+        isApplyingControlledUpdateRef.current = false;
       });
       snapshotRef.current = {
         value: snapshotRef.current.value,
@@ -1503,13 +1507,6 @@ function ComposerPromptEditorInner({
         expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
       };
-      onChangeRef.current(
-        snapshotRef.current.value,
-        boundedCursor,
-        snapshotRef.current.expandedCursor,
-        false,
-        snapshotRef.current.terminalContextIds,
-      );
     },
     [editor],
   );
@@ -1563,9 +1560,13 @@ function ComposerPromptEditorInner({
           ),
         );
       },
+      isFocused: () => {
+        const rootElement = editor.getRootElement();
+        return Boolean(rootElement && document.activeElement === rootElement);
+      },
       readSnapshot,
     }),
-    [focusAt, readSnapshot],
+    [editor, focusAt, readSnapshot],
   );
 
   const handleEditorChange = useCallback((editorState: EditorState) => {

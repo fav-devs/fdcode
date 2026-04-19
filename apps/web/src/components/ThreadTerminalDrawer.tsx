@@ -763,6 +763,7 @@ interface ThreadTerminalDrawerProps {
   onHeightChange: (height: number) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
   keybindings: ResolvedKeybindingsConfig;
+  showResizeHandle?: boolean;
 }
 
 interface TerminalActionButtonProps {
@@ -817,6 +818,7 @@ export default function ThreadTerminalDrawer({
   onHeightChange,
   onAddTerminalContext,
   keybindings,
+  showResizeHandle = true,
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
@@ -1053,16 +1055,20 @@ export default function ThreadTerminalDrawer({
 
   return (
     <aside
-      className="thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden border-t border-border/80 bg-background"
+      className={`thread-terminal-drawer relative flex min-w-0 shrink-0 flex-col overflow-hidden bg-background ${
+        showResizeHandle ? "border-t border-border/80" : ""
+      }`}
       style={{ height: `${drawerHeight}px` }}
     >
-      <div
-        className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
-        onPointerDown={handleResizePointerDown}
-        onPointerMove={handleResizePointerMove}
-        onPointerUp={handleResizePointerEnd}
-        onPointerCancel={handleResizePointerEnd}
-      />
+      {showResizeHandle ? (
+        <div
+          className="absolute inset-x-0 top-0 z-20 h-1.5 cursor-row-resize"
+          onPointerDown={handleResizePointerDown}
+          onPointerMove={handleResizePointerMove}
+          onPointerUp={handleResizePointerEnd}
+          onPointerCancel={handleResizePointerEnd}
+        />
+      ) : null}
 
       {!hasTerminalSidebar && (
         <div className="pointer-events-none absolute right-2 top-[30px] z-20">

@@ -100,7 +100,6 @@ interface PortsPanelProps {
 }
 
 export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
-  const environmentApi = readEnvironmentApi(environmentId);
   const forwards = usePortForwards();
   const [detected, setDetected] = useState<PortsDetectResult | null>(null);
   const [detectLoading, setDetectLoading] = useState(false);
@@ -114,18 +113,19 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const runDetect = useCallback(async () => {
-    if (!environmentApi) return;
+    const api = readEnvironmentApi(environmentId);
+    if (!api) return;
     setDetectLoading(true);
     setDetectError(null);
     try {
-      const result = await environmentApi.ports.detect(cwd ? { cwd } : undefined);
+      const result = await api.ports.detect(cwd ? { cwd } : undefined);
       setDetected(result);
     } catch (err) {
       setDetectError(err instanceof Error ? err.message : "Failed to detect ports");
     } finally {
       setDetectLoading(false);
     }
-  }, [cwd, environmentApi]);
+  }, [cwd, environmentId]);
 
   useEffect(() => {
     void runDetect();
@@ -133,10 +133,11 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
 
   const handleForward = useCallback(
     async (remotePort: number) => {
-      if (!environmentApi) return;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
       setForwardingPorts((prev) => new Set([...prev, remotePort]));
       try {
-        await environmentApi.ports.forwardCreate({ remotePort });
+        await api.ports.forwardCreate({ remotePort });
       } catch {
         // error surfaced via atom update failing
       } finally {
@@ -147,15 +148,16 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
         });
       }
     },
-    [environmentApi],
+    [environmentId],
   );
 
   const handleRemove = useCallback(
     async (forwardId: string) => {
-      if (!environmentApi) return;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
       setRemovingIds((prev) => new Set([...prev, forwardId]));
       try {
-        await environmentApi.ports.forwardRemove({ forwardId });
+        await api.ports.forwardRemove({ forwardId });
       } catch {
         // error surfaced via atom update failing
       } finally {
@@ -166,13 +168,14 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
         });
       }
     },
-    [environmentApi],
+    [environmentId],
   );
 
   const handleAddPortSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
-      if (!environmentApi) return;
+      const api = readEnvironmentApi(environmentId);
+      if (!api) return;
       const port = parsePort(addPortInput);
       if (port === null) {
         setAddPortError("Enter a port between 1 and 65535");
@@ -181,7 +184,7 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
       setAddPortError(null);
       setAddPortLoading(true);
       try {
-        await environmentApi.ports.forwardCreate({ remotePort: port });
+        await api.ports.forwardCreate({ remotePort: port });
         setAddPortInput("");
         inputRef.current?.focus();
       } catch (err) {
@@ -190,7 +193,7 @@ export function PortsPanel({ environmentId, cwd }: PortsPanelProps) {
         setAddPortLoading(false);
       }
     },
-    [addPortInput, environmentApi],
+    [addPortInput, environmentId],
   );
 
   const forwardedRemotePorts = new Set(forwards.map((f) => f.remotePort));

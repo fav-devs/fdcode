@@ -74,8 +74,12 @@ import {
   selectThreadByRef,
   useStore,
 } from "../store";
-import { selectThreadTerminalUiState, useTerminalUiStateStore } from "../terminalUiStateStore";
 import { useThreadRunningTerminalIds } from "../terminalSessionState";
+import {
+  selectThreadTerminalState,
+  useTerminalStateStore,
+  useThreadTerminalOpen,
+} from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
 import {
   resolveShortcutCommand,
@@ -170,17 +174,23 @@ import {
 import { sortThreads } from "../lib/threadSort";
 import { SidebarUpdatePill } from "./sidebar/SidebarUpdatePill";
 import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { CommandDialogTrigger } from "./ui/command";
 import { readEnvironmentApi } from "../environmentApi";
 import { useSettings, useUpdateSettings } from "~/hooks/useSettings";
 import { useServerKeybindings, useServerWelcome } from "../rpc/serverState";
 import { isHomeChatContainerProject, prewarmHomeChatProject } from "../lib/chatProjects";
-import { derivePhysicalProjectKey, deriveProjectGroupingOverrideKey } from "../logicalProject";
+import {
+  derivePhysicalProjectKey,
+  deriveProjectGroupingOverrideKey,
+  deriveLogicalProjectKey,
+} from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
-import type { SidebarThreadSummary } from "../types";
+import { serverThreadSurfaceInput, type WorkspaceLayoutEngine } from "../workspace/types";
+import { useWorkspaceDragStore } from "../workspace/dragStore";
+import { useWorkspaceLayoutEngine, useWorkspaceStore } from "../workspace/store";
+import type { Project, SidebarThreadSummary } from "../types";
 import { usePinnedThreadsStore } from "../pinnedThreadsStore";
 import {
   buildPhysicalToLogicalProjectKeyMap,
@@ -522,6 +532,24 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [],
   );
+  const handleDragStart = useCallback(
+    (event: React.DragEvent<HTMLElement>) => {
+      if (renamingThreadKey === threadKey) {
+        event.preventDefault();
+        return;
+      }
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", thread.id);
+      useWorkspaceDragStore.getState().setItem({
+        kind: "thread",
+        input: serverThreadSurfaceInput(threadRef),
+      });
+    },
+    [renamingThreadKey, thread.id, threadKey, threadRef],
+  );
+  const handleDragEnd = useCallback(() => {
+    useWorkspaceDragStore.getState().clearItem();
+  }, []);
   const handleConfirmArchiveClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
@@ -576,7 +604,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
           isActive,
           isSelected,
         })} group/thread-row relative isolate`}
+        draggable={renamingThreadKey !== threadKey}
         onClick={handleRowClick}
+        onDragEnd={handleDragEnd}
+        onDragStart={handleDragStart}
         onKeyDown={handleRowKeyDown}
         onContextMenu={handleRowContextMenu}
       >
@@ -987,6 +1018,14 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   const pinnedThreadKeys = usePinnedThreadsStore((state) => state.pinnedThreadKeys);
   const togglePinnedThread = usePinnedThreadsStore((state) => state.togglePinnedThread);
   const pinnedThreadKeySet = useMemo(() => new Set(pinnedThreadKeys), [pinnedThreadKeys]);
+  const openThreadInSplit = useWorkspaceStore((state) => state.openThreadInSplit);
+  const clearComposerDraftForThread = useComposerDraftStore((state) => state.clearDraftThread);
+  const getDraftThreadByProjectRef = useComposerDraftStore(
+    (state) => state.getDraftThreadByProjectRef,
+  );
+  const clearProjectDraftThreadId = useComposerDraftStore(
+    (state) => state.clearProjectDraftThreadId,
+  );
   const { copyToClipboard: copyThreadIdToClipboard } = useCopyToClipboard<{
     threadId: ThreadId;
   }>({
@@ -1915,6 +1954,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? project.cwd ?? null;
       const clicked = await api.contextMenu.show(
         [
+          { id: "open-split-right", label: "Open in split right" },
+          { id: "open-split-down", label: "Open in split down" },
           { id: "rename", label: "Rename thread" },
           {
             id: "toggle-pin",
@@ -1927,6 +1968,24 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         ],
         position,
       );
+
+      if (clicked === "open-split-right") {
+        openThreadInSplit(serverThreadSurfaceInput(threadRef), "x");
+        void router.navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(threadRef),
+        });
+        return;
+      }
+
+      if (clicked === "open-split-down") {
+        openThreadInSplit(serverThreadSurfaceInput(threadRef), "y");
+        void router.navigate({
+          to: "/$environmentId/$threadId",
+          params: buildThreadRouteParams(threadRef),
+        });
+        return;
+      }
 
       if (clicked === "rename") {
         setRenamingThreadKey(threadKey);
@@ -1980,8 +2039,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       deleteThread,
       markThreadUnread,
       memberProjectByScopedKey,
+      openThreadInSplit,
       pinnedThreadKeySet,
       project.cwd,
+      router,
       togglePinnedThread,
     ],
   );
@@ -2447,6 +2508,8 @@ const SidebarChromeHeader = memo(function SidebarChromeHeader({
 
 const SidebarChromeFooter = memo(function SidebarChromeFooter() {
   const navigate = useNavigate();
+  const layoutEngine = useWorkspaceLayoutEngine();
+  const setLayoutEngine = useWorkspaceStore((state) => state.setLayoutEngine);
   const handleSettingsClick = useCallback(() => {
     void navigate({ to: "/settings" });
   }, [navigate]);
@@ -2466,7 +2529,38 @@ const SidebarChromeFooter = memo(function SidebarChromeFooter() {
           </SidebarMenuButton>
         </SidebarMenuItem>
       </SidebarMenu>
+      <div className="mt-2 flex items-center gap-1 px-2">
+        <span className="text-[11px] text-muted-foreground/70">Layout</span>
+        <WorkspaceLayoutToggle
+          layoutEngine={layoutEngine}
+          onSelect={(engine) => setLayoutEngine(engine)}
+        />
+      </div>
     </SidebarFooter>
+  );
+});
+
+const WorkspaceLayoutToggle = memo(function WorkspaceLayoutToggle(props: {
+  layoutEngine: WorkspaceLayoutEngine;
+  onSelect: (engine: WorkspaceLayoutEngine) => void;
+}) {
+  return (
+    <div className="ml-auto flex items-center gap-1">
+      {(["split", "paper"] as const).map((engine) => (
+        <button
+          key={engine}
+          type="button"
+          className={
+            props.layoutEngine === engine
+              ? "rounded-md border border-border bg-accent px-2 py-1 text-[11px] text-foreground"
+              : "rounded-md border border-border/60 px-2 py-1 text-[11px] text-muted-foreground transition hover:bg-accent hover:text-foreground"
+          }
+          onClick={() => props.onSelect(engine)}
+        >
+          {engine === "split" ? "Split" : "Paper"}
+        </button>
+      ))}
+    </div>
   );
 });
 
@@ -2615,6 +2709,7 @@ interface SidebarProjectsContentProps {
   routeThreadKey: string | null;
   newThreadShortcutLabel: string | null;
   commandPaletteShortcutLabel: string | null;
+  onOpenCommandPalette: () => void;
   threadJumpLabelByKey: ReadonlyMap<string, string>;
   attachThreadListAutoAnimateRef: (node: HTMLElement | null) => void;
   expandThreadListForProject: (projectKey: string) => void;
@@ -2656,6 +2751,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
     routeThreadKey,
     newThreadShortcutLabel,
     commandPaletteShortcutLabel,
+    onOpenCommandPalette,
     threadJumpLabelByKey,
     attachThreadListAutoAnimateRef,
     expandThreadListForProject,
@@ -2691,14 +2787,12 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
       <SidebarGroup className="px-2 pt-2 pb-1">
         <SidebarMenu>
           <SidebarMenuItem>
-            <CommandDialogTrigger
-              render={
-                <SidebarMenuButton
-                  size="sm"
-                  className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
-                  data-testid="command-palette-trigger"
-                />
-              }
+            <SidebarMenuButton
+              type="button"
+              size="sm"
+              className="gap-2 px-2 py-1.5 text-muted-foreground/70 hover:bg-accent hover:text-foreground focus-visible:ring-0"
+              data-testid="command-palette-trigger"
+              onClick={onOpenCommandPalette}
             >
               <SearchIcon className="size-3.5" />
               <span className="flex-1 truncate text-left text-xs">Search</span>
@@ -2707,7 +2801,7 @@ const SidebarProjectsContent = memo(function SidebarProjectsContent(
                   {commandPaletteShortcutLabel}
                 </Kbd>
               ) : null}
-            </CommandDialogTrigger>
+            </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarGroup>
@@ -3026,10 +3120,12 @@ export default function Sidebar() {
     select: (params) => resolveThreadRouteRef(params),
   });
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
+  const routeThreadTerminalOpen = useThreadTerminalOpen(routeThreadRef);
   const keybindings = useServerKeybindings();
   const welcome = useServerWelcome();
   const homeDir = welcome?.cwd ?? null;
   const openAddProjectCommandPalette = useCommandPaletteStore((store) => store.openAddProject);
+  const setCommandPaletteOpen = useCommandPaletteStore((state) => state.setOpen);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
   >(() => new Set());
@@ -3155,14 +3251,9 @@ export default function Sidebar() {
   const getCurrentSidebarShortcutContext = useCallback(
     () => ({
       terminalFocus: isTerminalFocused(),
-      terminalOpen: routeThreadRef
-        ? selectThreadTerminalUiState(
-            useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
-            routeThreadRef,
-          ).terminalOpen
-        : false,
+      terminalOpen: routeThreadTerminalOpen,
     }),
-    [routeThreadRef],
+    [routeThreadTerminalOpen],
   );
   const newThreadShortcutLabelOptions = useMemo(
     () => ({
@@ -3742,6 +3833,7 @@ export default function Sidebar() {
             routeThreadKey={routeThreadKey}
             newThreadShortcutLabel={newThreadShortcutLabel}
             commandPaletteShortcutLabel={commandPaletteShortcutLabel}
+            onOpenCommandPalette={() => setCommandPaletteOpen(true)}
             threadJumpLabelByKey={visibleThreadJumpLabelByKey}
             attachThreadListAutoAnimateRef={attachThreadListAutoAnimateRef}
             expandThreadListForProject={expandThreadListForProject}
