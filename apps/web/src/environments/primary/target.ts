@@ -1,4 +1,7 @@
-import type { DesktopEnvironmentBootstrap } from "@t3tools/contracts";
+import type {
+  DesktopEnvironmentBootstrap,
+  DesktopPrimaryEnvironmentBinding,
+} from "@t3tools/contracts";
 import type { KnownEnvironment } from "@t3tools/client-runtime";
 
 export interface PrimaryEnvironmentTarget {
@@ -8,8 +11,30 @@ export interface PrimaryEnvironmentTarget {
 
 const LOOPBACK_HOSTNAMES = new Set(["127.0.0.1", "::1", "localhost"]);
 
-function getDesktopLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null {
-  return window.desktopBridge?.getLocalEnvironmentBootstrap() ?? null;
+function toDesktopPrimaryEnvironmentBinding(
+  bootstrap: DesktopEnvironmentBootstrap,
+): DesktopPrimaryEnvironmentBinding | null {
+  if (!bootstrap.httpBaseUrl || !bootstrap.wsBaseUrl) {
+    return null;
+  }
+
+  return {
+    kind: "embedded",
+    label: bootstrap.label,
+    httpBaseUrl: bootstrap.httpBaseUrl,
+    wsBaseUrl: bootstrap.wsBaseUrl,
+    ...(bootstrap.bootstrapToken ? { bootstrapToken: bootstrap.bootstrapToken } : {}),
+  };
+}
+
+export function readPrimaryEnvironmentBinding(): DesktopPrimaryEnvironmentBinding | null {
+  const desktopBinding = window.desktopBridge?.getPrimaryEnvironmentBinding?.();
+  if (desktopBinding) {
+    return desktopBinding;
+  }
+
+  const legacyBootstrap = window.desktopBridge?.getLocalEnvironmentBootstrap?.() ?? null;
+  return legacyBootstrap ? toDesktopPrimaryEnvironmentBinding(legacyBootstrap) : null;
 }
 
 function normalizeBaseUrl(rawValue: string): string {
@@ -110,24 +135,16 @@ function resolveWindowOriginPrimaryTarget(): PrimaryEnvironmentTarget {
 }
 
 function resolveDesktopPrimaryTarget(): PrimaryEnvironmentTarget | null {
-  const desktopBootstrap = getDesktopLocalEnvironmentBootstrap();
-  if (!desktopBootstrap) {
+  const desktopBinding = readPrimaryEnvironmentBinding();
+  if (!desktopBinding) {
     return null;
-  }
-  if (!desktopBootstrap.httpBaseUrl && !desktopBootstrap.wsBaseUrl) {
-    return null;
-  }
-  if (!desktopBootstrap.httpBaseUrl || !desktopBootstrap.wsBaseUrl) {
-    throw new Error(
-      "Desktop bootstrap must provide both httpBaseUrl and wsBaseUrl for the local environment.",
-    );
   }
 
   return {
     source: "desktop-managed",
     target: {
-      httpBaseUrl: normalizeBaseUrl(desktopBootstrap.httpBaseUrl),
-      wsBaseUrl: normalizeBaseUrl(desktopBootstrap.wsBaseUrl),
+      httpBaseUrl: normalizeBaseUrl(desktopBinding.httpBaseUrl),
+      wsBaseUrl: normalizeBaseUrl(desktopBinding.wsBaseUrl),
     },
   };
 }

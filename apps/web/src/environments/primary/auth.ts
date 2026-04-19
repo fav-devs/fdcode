@@ -1,4 +1,5 @@
 import type {
+  AuthBearerBootstrapResult,
   AuthBootstrapInput,
   AuthBootstrapResult,
   AuthClientMetadata,
@@ -15,7 +16,7 @@ import {
   stripPairingTokenFromUrl as stripPairingTokenUrl,
 } from "../../pairingUrl";
 
-import { resolvePrimaryEnvironmentHttpUrl } from "./target";
+import { readPrimaryEnvironmentBinding, resolvePrimaryEnvironmentHttpUrl } from "./target";
 import { Data, Predicate } from "effect";
 
 export class BootstrapHttpError extends Data.TaggedError("BootstrapHttpError")<{
@@ -84,17 +85,45 @@ export function takePairingTokenFromUrl(): string | null {
 }
 
 function getDesktopBootstrapCredential(): string | null {
-  const bootstrap = window.desktopBridge?.getLocalEnvironmentBootstrap();
-  return typeof bootstrap?.bootstrapToken === "string" && bootstrap.bootstrapToken.length > 0
-    ? bootstrap.bootstrapToken
+  const binding = readPrimaryEnvironmentBinding();
+  return typeof binding?.bootstrapToken === "string" && binding.bootstrapToken.length > 0
+    ? binding.bootstrapToken
     : null;
+}
+
+async function resolvePrimaryEnvironmentAuthHeaders(): Promise<Record<string, string>> {
+  const binding = readPrimaryEnvironmentBinding();
+  if (
+    binding?.kind !== "saved-environment" ||
+    !binding.environmentId ||
+    !window.desktopBridge?.getSavedEnvironmentSecret
+  ) {
+    return {};
+  }
+
+  const bearerToken = await window.desktopBridge.getSavedEnvironmentSecret(binding.environmentId);
+  return typeof bearerToken === "string" && bearerToken.length > 0
+    ? { authorization: `Bearer ${bearerToken}` }
+    : {};
+}
+
+async function fetchPrimaryEnvironment(pathname: string, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers);
+  const authHeaders = await resolvePrimaryEnvironmentAuthHeaders();
+  for (const [key, value] of Object.entries(authHeaders)) {
+    headers.set(key, value);
+  }
+
+  return fetch(resolvePrimaryEnvironmentHttpUrl(pathname), {
+    credentials: "include",
+    ...init,
+    headers,
+  });
 }
 
 export async function fetchSessionState(): Promise<AuthSessionState> {
   return retryTransientBootstrap(async () => {
-    const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/session"), {
-      credentials: "include",
-    });
+    const response = await fetchPrimaryEnvironment("/api/auth/session");
     if (!response.ok) {
       throw new BootstrapHttpError({
         message: `Failed to load server auth session state (${response.status}).`,
@@ -113,9 +142,8 @@ async function readErrorMessage(response: Response, fallbackMessage: string): Pr
 async function exchangeBootstrapCredential(credential: string): Promise<AuthBootstrapResult> {
   return retryTransientBootstrap(async () => {
     const payload: AuthBootstrapInput = { credential };
-    const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/bootstrap"), {
+    const response = await fetchPrimaryEnvironment("/api/auth/bootstrap", {
       body: JSON.stringify(payload),
-      credentials: "include",
       headers: {
         "content-type": "application/json",
       },
@@ -135,6 +163,11 @@ async function exchangeBootstrapCredential(credential: string): Promise<AuthBoot
 }
 
 async function waitForAuthenticatedSessionAfterBootstrap(): Promise<AuthSessionState> {
+  const binding = readPrimaryEnvironmentBinding();
+  if (binding?.kind === "saved-environment") {
+    return fetchSessionState();
+  }
+
   const startedAt = Date.now();
 
   while (true) {
@@ -192,6 +225,54 @@ function isTransientBootstrapError(error: unknown): boolean {
   return error instanceof DOMException && error.name === "AbortError";
 }
 
+async function exchangePrimaryBearerCredential(
+  credential: string,
+): Promise<AuthBearerBootstrapResult | null> {
+  const binding = readPrimaryEnvironmentBinding();
+  if (
+    binding?.kind !== "saved-environment" ||
+    !binding.environmentId ||
+    !window.desktopBridge?.setSavedEnvironmentSecret
+  ) {
+    return null;
+  }
+
+  const response = await fetchPrimaryEnvironment("/api/auth/bootstrap/bearer", {
+    body: JSON.stringify({ credential }),
+    headers: {
+      "content-type": "application/json",
+    },
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const message = await response.text();
+    throw new BootstrapHttpError({
+      message: message || `Failed to bootstrap remote bearer session (${response.status}).`,
+      status: response.status,
+    });
+  }
+
+  const result = (await response.json()) as AuthBearerBootstrapResult;
+  const persisted = await window.desktopBridge.setSavedEnvironmentSecret(
+    binding.environmentId,
+    result.sessionToken,
+  );
+  if (!persisted) {
+    throw new Error("Failed to persist the remote environment credential.");
+  }
+  return result;
+}
+
+async function exchangePrimaryCredential(credential: string): Promise<void> {
+  const remoteResult = await exchangePrimaryBearerCredential(credential);
+  if (remoteResult) {
+    return;
+  }
+
+  await exchangeBootstrapCredential(credential);
+}
+
 async function bootstrapServerAuth(): Promise<ServerAuthGateState> {
   const bootstrapCredential = getDesktopBootstrapCredential();
   const currentSession = await fetchSessionState();
@@ -226,7 +307,7 @@ export async function submitServerAuthCredential(credential: string): Promise<vo
   }
 
   resolvedAuthenticatedGateState = null;
-  await exchangeBootstrapCredential(trimmedCredential);
+  await exchangePrimaryCredential(trimmedCredential);
   bootstrapPromise = null;
   stripPairingTokenFromUrl();
 }
@@ -236,9 +317,8 @@ export async function createServerPairingCredential(
 ): Promise<AuthPairingCredentialResult> {
   const trimmedLabel = label?.trim();
   const payload: AuthCreatePairingCredentialInput = trimmedLabel ? { label: trimmedLabel } : {};
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/pairing-token"), {
+  const response = await fetchPrimaryEnvironment("/api/auth/pairing-token", {
     body: JSON.stringify(payload),
-    credentials: "include",
     headers: {
       "content-type": "application/json",
     },
@@ -255,9 +335,7 @@ export async function createServerPairingCredential(
 }
 
 export async function listServerPairingLinks(): Promise<ReadonlyArray<ServerPairingLinkRecord>> {
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/pairing-links"), {
-    credentials: "include",
-  });
+  const response = await fetchPrimaryEnvironment("/api/auth/pairing-links");
 
   if (!response.ok) {
     throw new Error(
@@ -270,9 +348,8 @@ export async function listServerPairingLinks(): Promise<ReadonlyArray<ServerPair
 
 export async function revokeServerPairingLink(id: string): Promise<void> {
   const payload: AuthRevokePairingLinkInput = { id };
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/pairing-links/revoke"), {
+  const response = await fetchPrimaryEnvironment("/api/auth/pairing-links/revoke", {
     body: JSON.stringify(payload),
-    credentials: "include",
     headers: {
       "content-type": "application/json",
     },
@@ -289,9 +366,7 @@ export async function revokeServerPairingLink(id: string): Promise<void> {
 export async function listServerClientSessions(): Promise<
   ReadonlyArray<ServerClientSessionRecord>
 > {
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/clients"), {
-    credentials: "include",
-  });
+  const response = await fetchPrimaryEnvironment("/api/auth/clients");
 
   if (!response.ok) {
     throw new Error(
@@ -304,9 +379,8 @@ export async function listServerClientSessions(): Promise<
 
 export async function revokeServerClientSession(sessionId: AuthSessionId): Promise<void> {
   const payload: AuthRevokeClientSessionInput = { sessionId };
-  const response = await fetch(resolvePrimaryEnvironmentHttpUrl("/api/auth/clients/revoke"), {
+  const response = await fetchPrimaryEnvironment("/api/auth/clients/revoke", {
     body: JSON.stringify(payload),
-    credentials: "include",
     headers: {
       "content-type": "application/json",
     },
@@ -321,13 +395,9 @@ export async function revokeServerClientSession(sessionId: AuthSessionId): Promi
 }
 
 export async function revokeOtherServerClientSessions(): Promise<number> {
-  const response = await fetch(
-    resolvePrimaryEnvironmentHttpUrl("/api/auth/clients/revoke-others"),
-    {
-      credentials: "include",
-      method: "POST",
-    },
-  );
+  const response = await fetchPrimaryEnvironment("/api/auth/clients/revoke-others", {
+    method: "POST",
+  });
 
   if (!response.ok) {
     throw new Error(

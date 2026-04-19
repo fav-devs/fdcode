@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+import { EnvironmentId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
@@ -10,6 +11,8 @@ import {
   resolveDefaultDesktopSettings,
   setDesktopServerExposurePreference,
   setDesktopUpdateChannelPreference,
+  useEmbeddedDesktopBackendPreference,
+  useSavedEnvironmentDesktopBackendPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
 
@@ -35,6 +38,8 @@ describe("desktopSettings", () => {
   it("defaults packaged nightly builds to the nightly update channel", () => {
     expect(resolveDefaultDesktopSettings("0.0.17-nightly.20260415.1")).toEqual({
       serverExposureMode: "local-only",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
     });
@@ -45,12 +50,16 @@ describe("desktopSettings", () => {
 
     writeDesktopSettings(settingsPath, {
       serverExposureMode: "network-accessible",
+      primaryBackendMode: "saved-environment",
+      primaryEnvironmentId: EnvironmentId.make("environment-remote"),
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
     });
 
     expect(readDesktopSettings(settingsPath, "0.0.17")).toEqual({
       serverExposureMode: "network-accessible",
+      primaryBackendMode: "saved-environment",
+      primaryEnvironmentId: EnvironmentId.make("environment-remote"),
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
     });
@@ -61,6 +70,8 @@ describe("desktopSettings", () => {
       setDesktopServerExposurePreference(
         {
           serverExposureMode: "local-only",
+          primaryBackendMode: "embedded",
+          primaryEnvironmentId: null,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
         },
@@ -68,6 +79,47 @@ describe("desktopSettings", () => {
       ),
     ).toEqual({
       serverExposureMode: "network-accessible",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+    });
+  });
+
+  it("persists the selected saved environment as the primary desktop backend", () => {
+    expect(
+      useSavedEnvironmentDesktopBackendPreference(
+        {
+          serverExposureMode: "local-only",
+          primaryBackendMode: "embedded",
+          primaryEnvironmentId: null,
+          updateChannel: "latest",
+          updateChannelConfiguredByUser: false,
+        },
+        EnvironmentId.make("environment-remote"),
+      ),
+    ).toEqual({
+      serverExposureMode: "local-only",
+      primaryBackendMode: "saved-environment",
+      primaryEnvironmentId: EnvironmentId.make("environment-remote"),
+      updateChannel: "latest",
+      updateChannelConfiguredByUser: false,
+    });
+  });
+
+  it("switches the desktop backend preference back to the embedded server", () => {
+    expect(
+      useEmbeddedDesktopBackendPreference({
+        serverExposureMode: "local-only",
+        primaryBackendMode: "saved-environment",
+        primaryEnvironmentId: EnvironmentId.make("environment-remote"),
+        updateChannel: "latest",
+        updateChannelConfiguredByUser: false,
+      }),
+    ).toEqual({
+      serverExposureMode: "local-only",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
       updateChannel: "latest",
       updateChannelConfiguredByUser: false,
     });
@@ -78,6 +130,8 @@ describe("desktopSettings", () => {
       setDesktopUpdateChannelPreference(
         {
           serverExposureMode: "local-only",
+          primaryBackendMode: "embedded",
+          primaryEnvironmentId: null,
           updateChannel: "latest",
           updateChannelConfiguredByUser: false,
         },
@@ -103,6 +157,8 @@ describe("desktopSettings", () => {
 
     expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
       serverExposureMode: "local-only",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
     });
@@ -121,6 +177,8 @@ describe("desktopSettings", () => {
 
     expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
       serverExposureMode: "local-only",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
       updateChannel: "nightly",
       updateChannelConfiguredByUser: false,
     });
@@ -140,6 +198,8 @@ describe("desktopSettings", () => {
 
     expect(readDesktopSettings(settingsPath, "0.0.17-nightly.20260415.1")).toEqual({
       serverExposureMode: "local-only",
+      primaryBackendMode: "embedded",
+      primaryEnvironmentId: null,
       updateChannel: "latest",
       updateChannelConfiguredByUser: true,
     });

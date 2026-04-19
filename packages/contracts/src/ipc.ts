@@ -129,6 +129,25 @@ export interface DesktopEnvironmentBootstrap {
   bootstrapToken?: string;
 }
 
+export type DesktopPrimaryBackendMode = "embedded" | "saved-environment";
+
+export interface DesktopPrimaryEnvironmentBinding {
+  kind: DesktopPrimaryBackendMode;
+  label: string;
+  httpBaseUrl: string;
+  wsBaseUrl: string;
+  environmentId?: EnvironmentId;
+  bootstrapToken?: string;
+}
+
+export interface DesktopPrimaryBackendState {
+  mode: DesktopPrimaryBackendMode;
+  environmentId: EnvironmentId | null;
+  label: string | null;
+  httpBaseUrl: string | null;
+  wsBaseUrl: string | null;
+}
+
 export interface PersistedSavedEnvironmentRecord {
   environmentId: EnvironmentId;
   label: string;
@@ -153,6 +172,7 @@ export interface PickFolderOptions {
 export interface DesktopBridge {
   getAppBranding: () => DesktopAppBranding | null;
   getLocalEnvironmentBootstrap: () => DesktopEnvironmentBootstrap | null;
+  getPrimaryEnvironmentBinding: () => DesktopPrimaryEnvironmentBinding | null;
   getClientSettings: () => Promise<ClientSettings | null>;
   setClientSettings: (settings: ClientSettings) => Promise<void>;
   getSavedEnvironmentRegistry: () => Promise<readonly PersistedSavedEnvironmentRecord[]>;
@@ -162,6 +182,11 @@ export interface DesktopBridge {
   getSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<string | null>;
   setSavedEnvironmentSecret: (environmentId: EnvironmentId, secret: string) => Promise<boolean>;
   removeSavedEnvironmentSecret: (environmentId: EnvironmentId) => Promise<void>;
+  getPrimaryBackendState: () => Promise<DesktopPrimaryBackendState>;
+  useSavedEnvironmentAsPrimaryBackend: (
+    environmentId: EnvironmentId,
+  ) => Promise<DesktopPrimaryBackendState>;
+  useEmbeddedBackendAsPrimary: () => Promise<DesktopPrimaryBackendState>;
   getServerExposureState: () => Promise<DesktopServerExposureState>;
   setServerExposureMode: (mode: DesktopServerExposureMode) => Promise<DesktopServerExposureState>;
   pickFolder: (options?: PickFolderOptions) => Promise<string | null>;
