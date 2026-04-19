@@ -8,6 +8,7 @@ import {
   type ServerLifecycleWelcomePayload,
   type ServerProvider,
   type ServerProviderUpdatedPayload,
+  type ServerResourceStatsPayload,
   type ServerSettings,
 } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
@@ -26,7 +27,7 @@ export interface ServerConfigUpdatedNotification {
 
 type ServerStateClient = Pick<
   WsRpcClient["server"],
-  "getConfig" | "subscribeConfig" | "subscribeLifecycle"
+  "getConfig" | "subscribeConfig" | "subscribeLifecycle" | "subscribeResourceStats"
 >;
 
 function makeStateAtom<A>(label: string, initialValue: A) {
@@ -58,6 +59,10 @@ const selectSettings = (config: ServerConfig | null): ServerSettings =>
 
 export const welcomeAtom = makeStateAtom<ServerLifecycleWelcomePayload | null>(
   "server-welcome",
+  null,
+);
+export const resourceStatsAtom = makeStateAtom<ServerResourceStatsPayload | null>(
+  "server-resource-stats",
   null,
 );
 export const serverConfigAtom = makeStateAtom<ServerConfig | null>("server-config", null);
@@ -177,6 +182,9 @@ export function startServerStateSync(client: ServerStateClient): () => void {
     client.subscribeConfig((event) => {
       applyServerConfigEvent(event);
     }),
+    client.subscribeResourceStats((event) => {
+      appAtomRegistry.set(resourceStatsAtom, event.payload);
+    }),
   ];
 
   if (getServerConfig() === null) {
@@ -264,6 +272,10 @@ export function useServerConfig(): ServerConfig | null {
 
 export function useServerWelcome(): ServerLifecycleWelcomePayload | null {
   return useAtomValue(welcomeAtom);
+}
+
+export function useResourceStats(): ServerResourceStatsPayload | null {
+  return useAtomValue(resourceStatsAtom);
 }
 
 export function useServerSettings(): ServerSettings {
