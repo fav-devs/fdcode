@@ -19,7 +19,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from "@t3tools/contracts/settings";
 import { normalizeModelSlug } from "@t3tools/shared/model";
 import { createModelSelection } from "@t3tools/shared/model";
 import { Equal } from "effect";
@@ -149,7 +149,7 @@ const PROVIDER_SETTINGS: readonly InstallProviderSettings[] = [
     binaryPlaceholder: "OpenCode binary path",
     binaryDescription: "Path to the OpenCode binary",
     serverUrlPlaceholder: "http://127.0.0.1:4096",
-    serverUrlDescription: "Leave blank to let T3 Code spawn the server when needed",
+    serverUrlDescription: "Leave blank to let fd code spawn the server when needed",
     serverPasswordPlaceholder: "Server password (optional)",
     serverPasswordDescription:
       "If your OpenCode server requires authentication, enter the password here. NOTE: Stored in plain text on disk",
@@ -171,6 +171,99 @@ const PROVIDER_STATUS_STYLES = {
   },
 } as const;
 
+type ProviderCard = {
+  provider: ProviderKind;
+  title: string;
+  badgeLabel?: string | undefined;
+  binaryPlaceholder: string;
+  binaryDescription: ReactNode;
+  serverUrlPlaceholder?: string | undefined;
+  serverUrlDescription?: ReactNode | undefined;
+  serverPasswordPlaceholder?: string | undefined;
+  serverPasswordDescription?: ReactNode | undefined;
+  homePathKey?: "codexHomePath" | undefined;
+  homePlaceholder?: string | undefined;
+  homeDescription?: ReactNode | undefined;
+  binaryPathValue: string;
+  serverUrlValue: string;
+  serverPasswordValue: string;
+  isDirty: boolean;
+  liveProvider: ServerProvider | undefined;
+  models: ReadonlyArray<ServerProviderModel>;
+  providerConfig: (typeof DEFAULT_UNIFIED_SETTINGS.providers)[ProviderKind];
+  statusStyle: (typeof PROVIDER_STATUS_STYLES)[keyof typeof PROVIDER_STATUS_STYLES];
+  summary: ReturnType<typeof getProviderSummary>;
+  versionLabel: string | null;
+};
+
+function getVisibleProviderSettings(serverProviders: ReadonlyArray<ServerProvider>) {
+  return PROVIDER_SETTINGS.filter(
+    (providerSettings) =>
+      providerSettings.provider !== "cursor" ||
+      serverProviders.some((provider) => provider.provider === "cursor"),
+  );
+}
+
+function buildProviderCards({
+  settings,
+  serverProviders,
+}: {
+  settings: UnifiedSettings;
+  serverProviders: ReadonlyArray<ServerProvider>;
+}): ReadonlyArray<ProviderCard> {
+  return getVisibleProviderSettings(serverProviders).map((providerSettings) => {
+    const liveProvider = serverProviders.find(
+      (candidate) => candidate.provider === providerSettings.provider,
+    );
+    const providerConfig = settings.providers[providerSettings.provider];
+    const defaultProviderConfig = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
+    const statusKey = liveProvider?.status ?? (providerConfig.enabled ? "warning" : "disabled");
+    const summary = getProviderSummary(liveProvider);
+    const models: ReadonlyArray<ServerProviderModel> =
+      liveProvider?.models ??
+      providerConfig.customModels.map((slug) => ({
+        slug,
+        name: slug,
+        isCustom: true,
+        capabilities: null,
+      }));
+
+    return {
+      provider: providerSettings.provider,
+      title: providerSettings.title,
+      badgeLabel: providerSettings.badgeLabel,
+      binaryPlaceholder: providerSettings.binaryPlaceholder,
+      binaryDescription: providerSettings.binaryDescription,
+      serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
+      serverUrlDescription: providerSettings.serverUrlDescription,
+      serverPasswordPlaceholder: providerSettings.serverPasswordPlaceholder,
+      serverPasswordDescription: providerSettings.serverPasswordDescription,
+      homePathKey: providerSettings.homePathKey,
+      homePlaceholder: providerSettings.homePlaceholder,
+      homeDescription: providerSettings.homeDescription,
+      binaryPathValue: providerConfig.binaryPath,
+      serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
+      serverPasswordValue: "serverPassword" in providerConfig ? providerConfig.serverPassword : "",
+      isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
+      liveProvider,
+      models,
+      providerConfig,
+      statusStyle: PROVIDER_STATUS_STYLES[statusKey],
+      summary,
+      versionLabel: getProviderVersionLabel(liveProvider?.version),
+    };
+  });
+}
+
+function getProvidersLastCheckedAt(serverProviders: ReadonlyArray<ServerProvider>) {
+  return serverProviders.length > 0
+    ? serverProviders.reduce(
+        (latest, provider) => (provider.checkedAt > latest ? provider.checkedAt : latest),
+        serverProviders[0]!.checkedAt,
+      )
+    : null;
+}
+
 function getProviderSummary(provider: ServerProvider | undefined) {
   if (!provider) {
     return {
@@ -182,7 +275,7 @@ function getProviderSummary(provider: ServerProvider | undefined) {
     return {
       headline: "Disabled",
       detail:
-        provider.message ?? "This provider is installed but disabled for new sessions in T3 Code.",
+        provider.message ?? "This provider is installed but disabled for new sessions in fd code.",
     };
   }
   if (!provider.installed) {
@@ -550,6 +643,43 @@ function AboutVersionSection() {
   );
 }
 
+function ProviderRefreshHeaderAction({
+  lastCheckedAt,
+  isRefreshingProviders,
+  onRefresh,
+}: {
+  lastCheckedAt: string | null;
+  isRefreshingProviders: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <Button
+              size="icon-xs"
+              variant="ghost"
+              className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
+              disabled={isRefreshingProviders}
+              onClick={() => void onRefresh()}
+              aria-label="Refresh provider status"
+            >
+              {isRefreshingProviders ? (
+                <LoaderIcon className="size-3 animate-spin" />
+              ) : (
+                <RefreshCwIcon className="size-3" />
+              )}
+            </Button>
+          }
+        />
+        <TooltipPopup side="top">Refresh provider status</TooltipPopup>
+      </Tooltip>
+    </div>
+  );
+}
+
 export function useSettingsRestore(onRestored?: () => void) {
   const { theme, setTheme } = useTheme();
   const settings = useSettings();
@@ -698,11 +828,6 @@ export function GeneralSettingsPanel() {
   const availableEditors = useServerAvailableEditors();
   const observability = useServerObservability();
   const serverProviders = useServerProviders();
-  const visibleProviderSettings = PROVIDER_SETTINGS.filter(
-    (providerSettings) =>
-      providerSettings.provider !== "cursor" ||
-      serverProviders.some((provider) => provider.provider === "cursor"),
-  );
   const codexHomePath = settings.providers.codex.homePath;
   const logsDirectoryPath = observability?.logsDirectoryPath ?? null;
   const diagnosticsDescription = (() => {
@@ -867,63 +992,18 @@ export function GeneralSettingsPanel() {
     [settings, updateSettings],
   );
 
-  const providerCards = visibleProviderSettings.map((providerSettings) => {
-    const liveProvider = serverProviders.find(
-      (candidate) => candidate.provider === providerSettings.provider,
-    );
-    const providerConfig = settings.providers[providerSettings.provider];
-    const defaultProviderConfig = DEFAULT_UNIFIED_SETTINGS.providers[providerSettings.provider];
-    const statusKey = liveProvider?.status ?? (providerConfig.enabled ? "warning" : "disabled");
-    const summary = getProviderSummary(liveProvider);
-    const models: ReadonlyArray<ServerProviderModel> =
-      liveProvider?.models ??
-      providerConfig.customModels.map((slug) => ({
-        slug,
-        name: slug,
-        isCustom: true,
-        capabilities: null,
-      }));
-
-    return {
-      provider: providerSettings.provider,
-      title: providerSettings.title,
-      badgeLabel: providerSettings.badgeLabel,
-      binaryPlaceholder: providerSettings.binaryPlaceholder,
-      binaryDescription: providerSettings.binaryDescription,
-      serverUrlPlaceholder: providerSettings.serverUrlPlaceholder,
-      serverUrlDescription: providerSettings.serverUrlDescription,
-      serverPasswordPlaceholder: providerSettings.serverPasswordPlaceholder,
-      serverPasswordDescription: providerSettings.serverPasswordDescription,
-      homePathKey: providerSettings.homePathKey,
-      homePlaceholder: providerSettings.homePlaceholder,
-      homeDescription: providerSettings.homeDescription,
-      binaryPathValue: providerConfig.binaryPath,
-      serverUrlValue: "serverUrl" in providerConfig ? providerConfig.serverUrl : "",
-      serverPasswordValue: "serverPassword" in providerConfig ? providerConfig.serverPassword : "",
-      isDirty: !Equal.equals(providerConfig, defaultProviderConfig),
-      liveProvider,
-      models,
-      providerConfig,
-      statusStyle: PROVIDER_STATUS_STYLES[statusKey],
-      summary,
-      versionLabel: getProviderVersionLabel(liveProvider?.version),
-    };
-  });
-
-  const lastCheckedAt =
-    serverProviders.length > 0
-      ? serverProviders.reduce(
-          (latest, provider) => (provider.checkedAt > latest ? provider.checkedAt : latest),
-          serverProviders[0]!.checkedAt,
-        )
-      : null;
+  const providerCards = useMemo(
+    () => buildProviderCards({ settings, serverProviders }),
+    [serverProviders, settings],
+  );
+  const lastCheckedAt = useMemo(() => getProvidersLastCheckedAt(serverProviders), [serverProviders]);
 
   return (
     <SettingsPageContainer>
       <SettingsSection title="General">
         <SettingsRow
           title="Theme"
-          description="Choose how T3 Code looks across the app."
+          description="Choose how fd code looks across the app."
           resetAction={
             theme !== "system" ? (
               <SettingResetButton label="theme" onClick={() => setTheme("system")} />
@@ -1243,30 +1323,11 @@ export function GeneralSettingsPanel() {
       <SettingsSection
         title="Providers"
         headerAction={
-          <div className="flex items-center gap-1.5">
-            <ProviderLastChecked lastCheckedAt={lastCheckedAt} />
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-                    disabled={isRefreshingProviders}
-                    onClick={() => void refreshProviders()}
-                    aria-label="Refresh provider status"
-                  >
-                    {isRefreshingProviders ? (
-                      <LoaderIcon className="size-3 animate-spin" />
-                    ) : (
-                      <RefreshCwIcon className="size-3" />
-                    )}
-                  </Button>
-                }
-              />
-              <TooltipPopup side="top">Refresh provider status</TooltipPopup>
-            </Tooltip>
-          </div>
+          <ProviderRefreshHeaderAction
+            lastCheckedAt={lastCheckedAt}
+            isRefreshingProviders={isRefreshingProviders}
+            onRefresh={refreshProviders}
+          />
         }
       >
         {providerCards.map((providerCard) => {
@@ -1320,7 +1381,6 @@ export function GeneralSettingsPanel() {
                       {providerCard.summary.headline}
                       {providerCard.summary.detail ? ` - ${providerCard.summary.detail}` : null}
                     </p>
-                    <ProviderUsageLimitsBlock provider={providerCard.liveProvider} />
                   </div>
                   <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
                     <Button
@@ -1760,6 +1820,117 @@ export function GeneralSettingsPanel() {
             </Button>
           }
         />
+      </SettingsSection>
+    </SettingsPageContainer>
+  );
+}
+
+export function UsageSettingsPanel() {
+  const settings = useSettings();
+  const serverProviders = useServerProviders();
+  const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
+  const refreshingRef = useRef(false);
+  const refreshProviders = useCallback(() => {
+    if (refreshingRef.current) return;
+    refreshingRef.current = true;
+    setIsRefreshingProviders(true);
+    void ensureLocalApi()
+      .server.refreshProviders()
+      .catch((error: unknown) => {
+        console.warn("Failed to refresh providers", error);
+      })
+      .finally(() => {
+        refreshingRef.current = false;
+        setIsRefreshingProviders(false);
+      });
+  }, []);
+
+  const providerCards = useMemo(
+    () => buildProviderCards({ settings, serverProviders }),
+    [serverProviders, settings],
+  );
+  const lastCheckedAt = useMemo(() => getProvidersLastCheckedAt(serverProviders), [serverProviders]);
+  const usageProviderCards = providerCards.filter((providerCard) => providerCard.liveProvider);
+  const hasAnyUsageData = usageProviderCards.some(
+    (providerCard) => providerCard.liveProvider?.usageLimits !== undefined,
+  );
+
+  return (
+    <SettingsPageContainer>
+      <SettingsSection
+        title="Provider usage"
+        headerAction={
+          <ProviderRefreshHeaderAction
+            lastCheckedAt={lastCheckedAt}
+            isRefreshingProviders={isRefreshingProviders}
+            onRefresh={refreshProviders}
+          />
+        }
+      >
+        {usageProviderCards.length === 0 ? (
+          <Empty className="min-h-72">
+            <EmptyMedia variant="icon">
+              <InfoIcon />
+            </EmptyMedia>
+            <EmptyHeader>
+              <EmptyTitle>No providers detected</EmptyTitle>
+              <EmptyDescription>
+                Refresh provider status or configure a provider in General settings first.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : !hasAnyUsageData ? (
+          <Empty className="min-h-72">
+            <EmptyMedia variant="icon">
+              <InfoIcon />
+            </EmptyMedia>
+            <EmptyHeader>
+              <EmptyTitle>Usage data unavailable</EmptyTitle>
+              <EmptyDescription>
+                This page only shows providers that report live usage windows in the latest server
+                snapshot.
+              </EmptyDescription>
+            </EmptyHeader>
+          </Empty>
+        ) : (
+          usageProviderCards.map((providerCard) => {
+            const providerDisplayName =
+              PROVIDER_DISPLAY_NAMES[providerCard.provider] ?? providerCard.title;
+
+            return (
+              <ProviderCardShell
+                key={providerCard.provider}
+                expanded={Boolean(providerCard.liveProvider?.usageLimits)}
+              >
+                <div className="px-4 py-4 sm:px-5">
+                  <div className="flex flex-col gap-2">
+                    <div className="flex min-h-5 items-center gap-1.5">
+                      <span
+                        className={cn("size-2 shrink-0 rounded-full", providerCard.statusStyle.dot)}
+                      />
+                      <h3 className="text-sm font-medium text-foreground">{providerDisplayName}</h3>
+                      {providerCard.badgeLabel ? (
+                        <Badge variant="warning" size="sm" className="shrink-0">
+                          {providerCard.badgeLabel}
+                        </Badge>
+                      ) : null}
+                      {providerCard.versionLabel ? (
+                        <code className="text-xs text-muted-foreground">
+                          {providerCard.versionLabel}
+                        </code>
+                      ) : null}
+                    </div>
+                    <p className="text-xs text-muted-foreground">
+                      {providerCard.summary.headline}
+                      {providerCard.summary.detail ? ` - ${providerCard.summary.detail}` : null}
+                    </p>
+                    <ProviderUsageLimitsBlock provider={providerCard.liveProvider} />
+                  </div>
+                </div>
+              </ProviderCardShell>
+            );
+          })
+        )}
       </SettingsSection>
     </SettingsPageContainer>
   );
