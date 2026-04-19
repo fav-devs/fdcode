@@ -23,7 +23,7 @@ export function NoActiveThreadState() {
         <div className="flex flex-1 items-center justify-center px-3 sm:px-5">
           <div className="flex w-full max-w-3xl flex-col items-center gap-4 px-6 pb-5 text-center select-none">
             <img
-              alt="T3 Code logo"
+              alt="fd code logo"
               className="size-12 rounded-lg object-contain"
               draggable={false}
               src="/favicon-32x32.png"

@@ -1392,13 +1392,13 @@ const runServerCommand = (
   });
 
 const startCommand = Command.make("start", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription("Run the fd code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
 );
 
 const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription(
-    "Run the T3 Code server without opening a browser and print headless pairing details.",
+    "Run the fd code server without opening a browser and print headless pairing details.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {
@@ -1410,7 +1410,7 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
 
 const hostCommand = Command.make("host", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription(
-    "Run the T3 Code server as a standalone remote host for desktop clients, keeping logs in the terminal and printing pairing details.",
+    "Run the fd code server as a standalone remote host for desktop clients, keeping logs in the terminal and printing pairing details.",
   ),
   Command.withHandler((flags) =>
     runServerCommand(flags, {
@@ -1563,7 +1563,7 @@ const daemonCommand = Command.make("daemon").pipe(
 );
 
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the T3 Code server."),
+  Command.withDescription("Run the fd code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
   Command.withSubcommands([
     startCommand,

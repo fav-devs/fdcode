@@ -70,7 +70,7 @@ function buildInitialCursorProviderSnapshot(cursorSettings: CursorSettings): Ser
         version: null,
         status: "warning",
         auth: { status: "unknown" },
-        message: "Cursor is disabled in T3 Code settings.",
+        message: "Cursor is disabled in fd code settings.",
         usageLimits: unavailableUsageLimits,
       },
     });
@@ -981,7 +981,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
           version: null,
           status: "warning",
           auth: { status: "unknown" },
-          message: "Cursor is disabled in T3 Code settings.",
+          message: "Cursor is disabled in fd code settings.",
         },
       });
     }
