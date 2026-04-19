@@ -78,7 +78,10 @@ export async function probeClaudeUsageLimits(input: {
       clearTimeout(fallbackHandle);
       clearTimeout(timeoutHandle);
       resolve({
-        usageLimits: parseClaudeUsageLimitsOutput({ checkedAt: input.checkedAt, output: rawOutput }),
+        usageLimits: parseClaudeUsageLimitsOutput({
+          checkedAt: input.checkedAt,
+          output: rawOutput,
+        }),
         rawOutput,
       });
     };

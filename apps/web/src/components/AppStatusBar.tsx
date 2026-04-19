@@ -1,4 +1,10 @@
-import { ActivityIcon, CpuIcon, FolderIcon, MemoryStickIcon, MessageSquareIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  CpuIcon,
+  FolderIcon,
+  MemoryStickIcon,
+  MessageSquareIcon,
+} from "lucide-react";
 import { memo } from "react";
 import { cn } from "../lib/utils";
 import { useResourceStats, useServerWelcome } from "../rpc/serverState";
@@ -116,7 +122,10 @@ export const AppStatusBar = memo(function AppStatusBar() {
     <div className="flex h-7 shrink-0 items-center border-t border-border/30 bg-black/[0.03] px-8 text-[11px] dark:bg-white/[0.02]">
       {/* Left section — connection + workspace */}
       <div className="flex items-center gap-2">
-        <ConnectionPill connected={isConnected} {...(welcome?.projectName ? { label: welcome.projectName } : {})} />
+        <ConnectionPill
+          connected={isConnected}
+          {...(welcome?.projectName ? { label: welcome.projectName } : {})}
+        />
 
         {welcome && (
           <>
@@ -150,9 +159,7 @@ function ConnectionPill({ connected, label }: { connected: boolean; label?: stri
   return (
     <div className="flex items-center gap-1.5">
       <span
-        className={cn(
-          "relative flex size-1.5 shrink-0",
-        )}
+        className={cn("relative flex size-1.5 shrink-0")}
         title={connected ? "Server connected" : "Connecting…"}
       >
         {connected && (

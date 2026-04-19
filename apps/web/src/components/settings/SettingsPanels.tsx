@@ -996,7 +996,10 @@ export function GeneralSettingsPanel() {
     () => buildProviderCards({ settings, serverProviders }),
     [serverProviders, settings],
   );
-  const lastCheckedAt = useMemo(() => getProvidersLastCheckedAt(serverProviders), [serverProviders]);
+  const lastCheckedAt = useMemo(
+    () => getProvidersLastCheckedAt(serverProviders),
+    [serverProviders],
+  );
 
   return (
     <SettingsPageContainer>
@@ -1849,7 +1852,10 @@ export function UsageSettingsPanel() {
     () => buildProviderCards({ settings, serverProviders }),
     [serverProviders, settings],
   );
-  const lastCheckedAt = useMemo(() => getProvidersLastCheckedAt(serverProviders), [serverProviders]);
+  const lastCheckedAt = useMemo(
+    () => getProvidersLastCheckedAt(serverProviders),
+    [serverProviders],
+  );
   const usageProviderCards = providerCards.filter((providerCard) => providerCard.liveProvider);
   const hasAnyUsageData = usageProviderCards.some(
     (providerCard) => providerCard.liveProvider?.usageLimits !== undefined,
