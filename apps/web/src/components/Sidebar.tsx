@@ -3033,7 +3033,7 @@ export default function Sidebar() {
   const routeThreadKey = routeThreadRef ? scopedThreadKey(routeThreadRef) : null;
   const keybindings = useServerKeybindings();
   const welcome = useServerWelcome();
-  const homeDir = welcome?.homeDir ?? null;
+  const homeDir = welcome?.cwd ?? null;
   const openAddProjectCommandPalette = useCommandPaletteStore((store) => store.openAddProject);
   const [expandedThreadListsByProject, setExpandedThreadListsByProject] = useState<
     ReadonlySet<string>
