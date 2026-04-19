@@ -256,6 +256,21 @@ export const ServerLifecycleStreamEvent = Schema.Union([
 ]);
 export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
 
+export const ServerResourceStatsPayload = Schema.Struct({
+  cpuLoad1m: Schema.Number,
+  cpuCount: Schema.Number,
+  memoryUsedBytes: Schema.Number,
+  memoryTotalBytes: Schema.Number,
+});
+export type ServerResourceStatsPayload = typeof ServerResourceStatsPayload.Type;
+
+export const ServerResourceStatsEvent = Schema.Struct({
+  version: Schema.Literal(1),
+  type: Schema.Literal("snapshot"),
+  payload: ServerResourceStatsPayload,
+});
+export type ServerResourceStatsEvent = typeof ServerResourceStatsEvent.Type;
+
 export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
 });
