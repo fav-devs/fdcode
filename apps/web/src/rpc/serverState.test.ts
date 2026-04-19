@@ -2,6 +2,7 @@ import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
   ProjectId,
+  type ServerResourceStatsEvent,
   ThreadId,
   type ServerConfig,
   type ServerConfigStreamEvent,
@@ -37,6 +38,7 @@ function createDeferredPromise<T>() {
 
 const lifecycleListeners = new Set<(event: ServerLifecycleStreamEvent) => void>();
 const configListeners = new Set<(event: ServerConfigStreamEvent) => void>();
+const resourceStatsListeners = new Set<(event: ServerResourceStatsEvent) => void>();
 
 const defaultProviders: ReadonlyArray<ServerProvider> = [
   {
@@ -97,6 +99,9 @@ const serverApi = {
   subscribeLifecycle: vi.fn((listener: (event: ServerLifecycleStreamEvent) => void) =>
     registerListener(lifecycleListeners, listener),
   ),
+  subscribeResourceStats: vi.fn((listener: (event: ServerResourceStatsEvent) => void) =>
+    registerListener(resourceStatsListeners, listener),
+  ),
 };
 
 function emitLifecycleEvent(event: ServerLifecycleStreamEvent) {
@@ -130,6 +135,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   lifecycleListeners.clear();
   configListeners.clear();
+  resourceStatsListeners.clear();
   resetServerStateForTests();
 });
 

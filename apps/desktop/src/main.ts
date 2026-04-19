@@ -23,6 +23,8 @@ import type {
   ClientSettings,
   DesktopTheme,
   DesktopAppBranding,
+  DesktopPrimaryBackendState,
+  DesktopPrimaryEnvironmentBinding,
   DesktopServerExposureMode,
   DesktopServerExposureState,
   DesktopUpdateChannel,
@@ -42,6 +44,8 @@ import {
   readDesktopSettings,
   setDesktopServerExposurePreference,
   setDesktopUpdateChannelPreference,
+  useEmbeddedDesktopBackendPreference,
+  useSavedEnvironmentDesktopBackendPreference,
   writeDesktopSettings,
 } from "./desktopSettings.ts";
 import {
@@ -92,6 +96,7 @@ const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const UPDATE_CHECK_CHANNEL = "desktop:update-check";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
+const GET_PRIMARY_ENVIRONMENT_BINDING_CHANNEL = "desktop:get-primary-environment-binding";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
@@ -99,6 +104,10 @@ const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-re
 const GET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:get-saved-environment-secret";
 const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secret";
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
+const GET_PRIMARY_BACKEND_STATE_CHANNEL = "desktop:get-primary-backend-state";
+const USE_SAVED_ENVIRONMENT_AS_PRIMARY_BACKEND_CHANNEL =
+  "desktop:use-saved-environment-as-primary-backend";
+const USE_EMBEDDED_BACKEND_AS_PRIMARY_CHANNEL = "desktop:use-embedded-backend-as-primary";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 const BASE_DIR = process.env.T3CODE_HOME?.trim() || Path.join(OS.homedir(), ".t3");
@@ -207,6 +216,7 @@ let backendBindHost = DESKTOP_LOOPBACK_HOST;
 let backendBootstrapToken = "";
 let backendHttpUrl = "";
 let backendWsUrl = "";
+let primaryEnvironmentBinding: DesktopPrimaryEnvironmentBinding | null = null;
 let backendEndpointUrl: string | null = null;
 let backendAdvertisedHost: string | null = null;
 let backendReadinessAbortController: AbortController | null = null;
@@ -307,6 +317,39 @@ function getDesktopServerExposureState(): DesktopServerExposureState {
   };
 }
 
+function getPrimaryEnvironmentBinding(): DesktopPrimaryEnvironmentBinding | null {
+  return primaryEnvironmentBinding;
+}
+
+function getPrimaryBackendState(): DesktopPrimaryBackendState {
+  const binding = primaryEnvironmentBinding;
+  if (!binding) {
+    return {
+      mode: "embedded",
+      environmentId: null,
+      label: null,
+      httpBaseUrl: null,
+      wsBaseUrl: null,
+    };
+  }
+
+  return {
+    mode: binding.kind,
+    environmentId: binding.environmentId ?? null,
+    label: binding.label,
+    httpBaseUrl: binding.httpBaseUrl,
+    wsBaseUrl: binding.wsBaseUrl,
+  };
+}
+
+function findSavedEnvironmentRecord(environmentId: string): PersistedSavedEnvironmentRecord | null {
+  return (
+    readSavedEnvironmentRegistry(SAVED_ENVIRONMENT_REGISTRY_PATH).find(
+      (record) => record.environmentId === environmentId,
+    ) ?? null
+  );
+}
+
 function getDesktopSecretStorage() {
   return {
     isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
@@ -352,6 +395,13 @@ async function applyDesktopServerExposureMode(
   backendWsUrl = exposure.localWsUrl;
   backendEndpointUrl = exposure.endpointUrl;
   backendAdvertisedHost = exposure.advertisedHost;
+  if (primaryEnvironmentBinding?.kind === "embedded") {
+    primaryEnvironmentBinding = {
+      ...primaryEnvironmentBinding,
+      httpBaseUrl: exposure.localHttpUrl,
+      wsBaseUrl: exposure.localWsUrl,
+    };
+  }
 
   if (options?.persist) {
     writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
@@ -1559,11 +1609,17 @@ function registerIpcHandlers(): void {
   ipcMain.removeAllListeners(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL);
   ipcMain.on(GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL, (event) => {
     event.returnValue = {
-      label: "Local environment",
-      httpBaseUrl: backendHttpUrl || null,
-      wsBaseUrl: backendWsUrl || null,
-      bootstrapToken: backendBootstrapToken || undefined,
+      label: primaryEnvironmentBinding?.label ?? "Local environment",
+      httpBaseUrl: (primaryEnvironmentBinding?.httpBaseUrl ?? backendHttpUrl) || null,
+      wsBaseUrl: (primaryEnvironmentBinding?.wsBaseUrl ?? backendWsUrl) || null,
+      bootstrapToken:
+        (primaryEnvironmentBinding?.bootstrapToken ?? backendBootstrapToken) || undefined,
     } as const;
+  });
+
+  ipcMain.removeAllListeners(GET_PRIMARY_ENVIRONMENT_BINDING_CHANNEL);
+  ipcMain.on(GET_PRIMARY_ENVIRONMENT_BINDING_CHANNEL, (event) => {
+    event.returnValue = getPrimaryEnvironmentBinding();
   });
 
   ipcMain.removeHandler(GET_CLIENT_SETTINGS_CHANNEL);
@@ -1645,6 +1701,54 @@ function registerIpcHandlers(): void {
       });
     },
   );
+
+  ipcMain.removeHandler(GET_PRIMARY_BACKEND_STATE_CHANNEL);
+  ipcMain.handle(GET_PRIMARY_BACKEND_STATE_CHANNEL, async () => getPrimaryBackendState());
+
+  ipcMain.removeHandler(USE_SAVED_ENVIRONMENT_AS_PRIMARY_BACKEND_CHANNEL);
+  ipcMain.handle(
+    USE_SAVED_ENVIRONMENT_AS_PRIMARY_BACKEND_CHANNEL,
+    async (_event, rawEnvironmentId: unknown) => {
+      if (typeof rawEnvironmentId !== "string" || rawEnvironmentId.trim().length === 0) {
+        throw new Error("Invalid saved environment id.");
+      }
+
+      const record = findSavedEnvironmentRecord(rawEnvironmentId);
+      if (!record) {
+        throw new Error("Saved environment not found.");
+      }
+
+      desktopSettings = useSavedEnvironmentDesktopBackendPreference(
+        desktopSettings,
+        record.environmentId,
+      );
+      writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+      const nextState: DesktopPrimaryBackendState = {
+        mode: "saved-environment",
+        environmentId: record.environmentId,
+        label: record.label,
+        httpBaseUrl: record.httpBaseUrl,
+        wsBaseUrl: record.wsBaseUrl,
+      };
+      relaunchDesktopApp(`primaryBackend=saved-environment:${record.environmentId}`);
+      return nextState;
+    },
+  );
+
+  ipcMain.removeHandler(USE_EMBEDDED_BACKEND_AS_PRIMARY_CHANNEL);
+  ipcMain.handle(USE_EMBEDDED_BACKEND_AS_PRIMARY_CHANNEL, async () => {
+    desktopSettings = useEmbeddedDesktopBackendPreference(desktopSettings);
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+    const nextState: DesktopPrimaryBackendState = {
+      mode: "embedded",
+      environmentId: null,
+      label: null,
+      httpBaseUrl: null,
+      wsBaseUrl: null,
+    };
+    relaunchDesktopApp("primaryBackend=embedded");
+    return nextState;
+  });
 
   ipcMain.removeHandler(GET_SERVER_EXPOSURE_STATE_CHANNEL);
   ipcMain.handle(GET_SERVER_EXPOSURE_STATE_CHANNEL, async () => getDesktopServerExposureState());
@@ -2025,6 +2129,34 @@ function createWindow(): BrowserWindow {
   return window;
 }
 
+function resolveConfiguredPrimaryEnvironmentBinding(): {
+  kind: "saved-environment";
+  record: PersistedSavedEnvironmentRecord;
+} | null {
+  const requestedEnvironmentId = desktopSettings.primaryEnvironmentId;
+  if (
+    desktopSettings.primaryBackendMode !== "saved-environment" ||
+    requestedEnvironmentId === null
+  ) {
+    return null;
+  }
+
+  const record = findSavedEnvironmentRecord(requestedEnvironmentId);
+  if (!record) {
+    desktopSettings = useEmbeddedDesktopBackendPreference(desktopSettings);
+    writeDesktopSettings(DESKTOP_SETTINGS_PATH, desktopSettings);
+    writeDesktopLogHeader(
+      `saved primary backend missing; falling back to embedded environmentId=${requestedEnvironmentId}`,
+    );
+    return null;
+  }
+
+  return {
+    kind: "saved-environment",
+    record,
+  };
+}
+
 // Override Electron's userData path before the `ready` event so that
 // Chromium session data uses a filesystem-friendly directory name.
 // Must be called synchronously at the top level — before `app.whenReady()`.
@@ -2034,6 +2166,37 @@ configureAppIdentity();
 
 async function bootstrap(): Promise<void> {
   writeDesktopLogHeader("bootstrap start");
+  const configuredPrimaryBinding = resolveConfiguredPrimaryEnvironmentBinding();
+  if (configuredPrimaryBinding) {
+    const { record } = configuredPrimaryBinding;
+    primaryEnvironmentBinding = {
+      kind: "saved-environment",
+      environmentId: record.environmentId,
+      label: record.label,
+      httpBaseUrl: record.httpBaseUrl,
+      wsBaseUrl: record.wsBaseUrl,
+    };
+    backendHttpUrl = record.httpBaseUrl;
+    backendWsUrl = record.wsBaseUrl;
+    backendBootstrapToken = "";
+    backendBindHost = "";
+    backendEndpointUrl = null;
+    backendAdvertisedHost = null;
+    registerIpcHandlers();
+    writeDesktopLogHeader(
+      `bootstrap using saved primary backend environmentId=${record.environmentId} baseUrl=${record.httpBaseUrl}`,
+    );
+
+    if (isDevelopment) {
+      mainWindow = createWindow();
+      writeDesktopLogHeader("bootstrap main window created");
+      return;
+    }
+
+    ensureInitialBackendWindowOpen();
+    return;
+  }
+
   const configuredBackendPort = resolveConfiguredDesktopBackendPort(process.env.T3CODE_PORT);
   if (isDevelopment && configuredBackendPort === undefined) {
     throw new Error("T3CODE_PORT is required in desktop development.");
@@ -2073,6 +2236,13 @@ async function bootstrap(): Promise<void> {
       "bootstrap fell back to local-only because no advertised network host was available",
     );
   }
+  primaryEnvironmentBinding = {
+    kind: "embedded",
+    label: "Local environment",
+    httpBaseUrl: backendHttpUrl,
+    wsBaseUrl: backendWsUrl,
+    bootstrapToken: backendBootstrapToken,
+  };
 
   registerIpcHandlers();
   writeDesktopLogHeader("bootstrap ipc handlers registered");

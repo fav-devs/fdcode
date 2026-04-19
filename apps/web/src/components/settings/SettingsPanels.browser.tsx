@@ -286,6 +286,13 @@ const createDesktopBridgeStub = (overrides?: {
       wsBaseUrl: "ws://127.0.0.1:3773",
       bootstrapToken: "desktop-bootstrap-token",
     }),
+    getPrimaryEnvironmentBinding: () => ({
+      kind: "embedded",
+      label: "Local environment",
+      httpBaseUrl: "http://127.0.0.1:3773",
+      wsBaseUrl: "ws://127.0.0.1:3773",
+      bootstrapToken: "desktop-bootstrap-token",
+    }),
     getClientSettings: vi.fn().mockResolvedValue(null),
     setClientSettings: vi.fn().mockResolvedValue(undefined),
     getSavedEnvironmentRegistry: vi.fn().mockResolvedValue([]),
@@ -293,6 +300,27 @@ const createDesktopBridgeStub = (overrides?: {
     getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
     setSavedEnvironmentSecret: vi.fn().mockResolvedValue(true),
     removeSavedEnvironmentSecret: vi.fn().mockResolvedValue(undefined),
+    getPrimaryBackendState: vi.fn().mockResolvedValue({
+      mode: "embedded",
+      environmentId: null,
+      label: "Local environment",
+      httpBaseUrl: "http://127.0.0.1:3773",
+      wsBaseUrl: "ws://127.0.0.1:3773",
+    }),
+    useSavedEnvironmentAsPrimaryBackend: vi.fn().mockResolvedValue({
+      mode: "saved-environment",
+      environmentId: "environment-remote",
+      label: "Remote environment",
+      httpBaseUrl: "https://remote.example.com",
+      wsBaseUrl: "wss://remote.example.com",
+    }),
+    useEmbeddedBackendAsPrimary: vi.fn().mockResolvedValue({
+      mode: "embedded",
+      environmentId: null,
+      label: "Local environment",
+      httpBaseUrl: "http://127.0.0.1:3773",
+      wsBaseUrl: "ws://127.0.0.1:3773",
+    }),
     getServerExposureState: vi.fn().mockResolvedValue(
       overrides?.serverExposureState ?? {
         mode: "local-only",

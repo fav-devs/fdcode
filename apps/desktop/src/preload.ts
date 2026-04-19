@@ -15,6 +15,7 @@ const UPDATE_DOWNLOAD_CHANNEL = "desktop:update-download";
 const UPDATE_INSTALL_CHANNEL = "desktop:update-install";
 const GET_APP_BRANDING_CHANNEL = "desktop:get-app-branding";
 const GET_LOCAL_ENVIRONMENT_BOOTSTRAP_CHANNEL = "desktop:get-local-environment-bootstrap";
+const GET_PRIMARY_ENVIRONMENT_BINDING_CHANNEL = "desktop:get-primary-environment-binding";
 const GET_CLIENT_SETTINGS_CHANNEL = "desktop:get-client-settings";
 const SET_CLIENT_SETTINGS_CHANNEL = "desktop:set-client-settings";
 const GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:get-saved-environment-registry";
@@ -22,6 +23,10 @@ const SET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL = "desktop:set-saved-environment-re
 const GET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:get-saved-environment-secret";
 const SET_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:set-saved-environment-secret";
 const REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL = "desktop:remove-saved-environment-secret";
+const GET_PRIMARY_BACKEND_STATE_CHANNEL = "desktop:get-primary-backend-state";
+const USE_SAVED_ENVIRONMENT_AS_PRIMARY_BACKEND_CHANNEL =
+  "desktop:use-saved-environment-as-primary-backend";
+const USE_EMBEDDED_BACKEND_AS_PRIMARY_CHANNEL = "desktop:use-embedded-backend-as-primary";
 const GET_SERVER_EXPOSURE_STATE_CHANNEL = "desktop:get-server-exposure-state";
 const SET_SERVER_EXPOSURE_MODE_CHANNEL = "desktop:set-server-exposure-mode";
 
@@ -40,6 +45,13 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     }
     return result as ReturnType<DesktopBridge["getLocalEnvironmentBootstrap"]>;
   },
+  getPrimaryEnvironmentBinding: () => {
+    const result = ipcRenderer.sendSync(GET_PRIMARY_ENVIRONMENT_BINDING_CHANNEL);
+    if (typeof result !== "object" || result === null) {
+      return null;
+    }
+    return result as ReturnType<DesktopBridge["getPrimaryEnvironmentBinding"]>;
+  },
   getClientSettings: () => ipcRenderer.invoke(GET_CLIENT_SETTINGS_CHANNEL),
   setClientSettings: (settings) => ipcRenderer.invoke(SET_CLIENT_SETTINGS_CHANNEL, settings),
   getSavedEnvironmentRegistry: () => ipcRenderer.invoke(GET_SAVED_ENVIRONMENT_REGISTRY_CHANNEL),
@@ -51,6 +63,10 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     ipcRenderer.invoke(SET_SAVED_ENVIRONMENT_SECRET_CHANNEL, environmentId, secret),
   removeSavedEnvironmentSecret: (environmentId) =>
     ipcRenderer.invoke(REMOVE_SAVED_ENVIRONMENT_SECRET_CHANNEL, environmentId),
+  getPrimaryBackendState: () => ipcRenderer.invoke(GET_PRIMARY_BACKEND_STATE_CHANNEL),
+  useSavedEnvironmentAsPrimaryBackend: (environmentId) =>
+    ipcRenderer.invoke(USE_SAVED_ENVIRONMENT_AS_PRIMARY_BACKEND_CHANNEL, environmentId),
+  useEmbeddedBackendAsPrimary: () => ipcRenderer.invoke(USE_EMBEDDED_BACKEND_AS_PRIMARY_CHANNEL),
   getServerExposureState: () => ipcRenderer.invoke(GET_SERVER_EXPOSURE_STATE_CHANNEL),
   setServerExposureMode: (mode) => ipcRenderer.invoke(SET_SERVER_EXPOSURE_MODE_CHANNEL, mode),
   pickFolder: (options) => ipcRenderer.invoke(PICK_FOLDER_CHANNEL, options),

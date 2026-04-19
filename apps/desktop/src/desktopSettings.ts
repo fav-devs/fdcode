@@ -1,17 +1,26 @@
 import * as FS from "node:fs";
 import * as Path from "node:path";
-import type { DesktopServerExposureMode, DesktopUpdateChannel } from "@t3tools/contracts";
+import type {
+  DesktopPrimaryBackendMode,
+  DesktopServerExposureMode,
+  DesktopUpdateChannel,
+  EnvironmentId,
+} from "@t3tools/contracts";
 
 import { resolveDefaultDesktopUpdateChannel } from "./updateChannels.ts";
 
 export interface DesktopSettings {
   readonly serverExposureMode: DesktopServerExposureMode;
+  readonly primaryBackendMode: DesktopPrimaryBackendMode;
+  readonly primaryEnvironmentId: EnvironmentId | null;
   readonly updateChannel: DesktopUpdateChannel;
   readonly updateChannelConfiguredByUser: boolean;
 }
 
 export const DEFAULT_DESKTOP_SETTINGS: DesktopSettings = {
   serverExposureMode: "local-only",
+  primaryBackendMode: "embedded",
+  primaryEnvironmentId: null,
   updateChannel: "latest",
   updateChannelConfiguredByUser: false,
 };
@@ -32,6 +41,30 @@ export function setDesktopServerExposurePreference(
     : {
         ...settings,
         serverExposureMode: requestedMode,
+      };
+}
+
+export function useEmbeddedDesktopBackendPreference(settings: DesktopSettings): DesktopSettings {
+  return settings.primaryBackendMode === "embedded" && settings.primaryEnvironmentId === null
+    ? settings
+    : {
+        ...settings,
+        primaryBackendMode: "embedded",
+        primaryEnvironmentId: null,
+      };
+}
+
+export function useSavedEnvironmentDesktopBackendPreference(
+  settings: DesktopSettings,
+  environmentId: EnvironmentId,
+): DesktopSettings {
+  return settings.primaryBackendMode === "saved-environment" &&
+    settings.primaryEnvironmentId === environmentId
+    ? settings
+    : {
+        ...settings,
+        primaryBackendMode: "saved-environment",
+        primaryEnvironmentId: environmentId,
       };
 }
 
@@ -57,6 +90,8 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
     const raw = FS.readFileSync(settingsPath, "utf8");
     const parsed = JSON.parse(raw) as {
       readonly serverExposureMode?: unknown;
+      readonly primaryBackendMode?: unknown;
+      readonly primaryEnvironmentId?: unknown;
       readonly updateChannel?: unknown;
       readonly updateChannelConfiguredByUser?: unknown;
     };
@@ -72,6 +107,12 @@ export function readDesktopSettings(settingsPath: string, appVersion: string): D
     return {
       serverExposureMode:
         parsed.serverExposureMode === "network-accessible" ? "network-accessible" : "local-only",
+      primaryBackendMode:
+        parsed.primaryBackendMode === "saved-environment" ? "saved-environment" : "embedded",
+      primaryEnvironmentId:
+        typeof parsed.primaryEnvironmentId === "string" && parsed.primaryEnvironmentId.length > 0
+          ? (parsed.primaryEnvironmentId as EnvironmentId)
+          : null,
       updateChannel:
         updateChannelConfiguredByUser && parsedUpdateChannel !== null
           ? parsedUpdateChannel

@@ -29,7 +29,7 @@ import { collectActiveTerminalUiThreadKeys } from "~/lib/terminalUiStateCleanup"
 import { deriveOrchestrationBatchEffects } from "~/orchestrationEventEffects";
 import { projectQueryKeys } from "~/lib/projectReactQuery";
 import { providerQueryKeys } from "~/lib/providerReactQuery";
-import { getPrimaryKnownEnvironment } from "../primary";
+import { getPrimaryKnownEnvironment, readPrimaryEnvironmentBinding } from "../primary";
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteEnvironmentDescriptor,
@@ -649,6 +649,28 @@ function createWsRpcClient(transport: WsTransport): WsRpcClient {
 function createPrimaryEnvironmentClient(
   knownEnvironment: ReturnType<typeof getPrimaryKnownEnvironment>,
 ) {
+  const primaryBinding = readPrimaryEnvironmentBinding();
+  if (
+    primaryBinding?.kind === "saved-environment" &&
+    primaryBinding.environmentId &&
+    primaryBinding.httpBaseUrl &&
+    primaryBinding.wsBaseUrl
+  ) {
+    return createWsRpcClient(
+      new WsTransport(async () => {
+        const bearerToken = await readSavedEnvironmentBearerToken(primaryBinding.environmentId!);
+        if (!bearerToken) {
+          throw new Error("Primary remote environment is missing its saved credential.");
+        }
+        return resolveRemoteWebSocketConnectionUrl({
+          wsBaseUrl: primaryBinding.wsBaseUrl,
+          httpBaseUrl: primaryBinding.httpBaseUrl,
+          bearerToken,
+        });
+      }),
+    );
+  }
+
   const wsBaseUrl = getKnownEnvironmentWsBaseUrl(knownEnvironment);
   if (!wsBaseUrl) {
     throw new Error(

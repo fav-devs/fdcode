@@ -3,6 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import {
   type AuthClientSession,
   type AuthPairingLink,
+  type DesktopPrimaryBackendState,
   type DesktopServerExposureState,
   type EnvironmentId,
 } from "@t3tools/contracts";
@@ -667,16 +668,24 @@ const PairingClientsList = memo(function PairingClientsList({
 
 type SavedBackendListRowProps = {
   environmentId: EnvironmentId;
+  isPrimaryBackend: boolean;
+  canUseAsPrimary: boolean;
+  isSwitchingPrimaryBackend: boolean;
   reconnectingEnvironmentId: EnvironmentId | null;
   removingEnvironmentId: EnvironmentId | null;
+  onUseAsPrimary: (environmentId: EnvironmentId) => void;
   onReconnect: (environmentId: EnvironmentId) => void;
   onRemove: (environmentId: EnvironmentId) => void;
 };
 
 function SavedBackendListRow({
   environmentId,
+  isPrimaryBackend,
+  canUseAsPrimary,
+  isSwitchingPrimaryBackend,
   reconnectingEnvironmentId,
   removingEnvironmentId,
+  onUseAsPrimary,
   onReconnect,
   onRemove,
 }: SavedBackendListRowProps) {
@@ -688,7 +697,9 @@ function SavedBackendListRow({
     return null;
   }
 
-  const connectionState = runtime?.connectionState ?? "disconnected";
+  const connectionState = isPrimaryBackend
+    ? "connected"
+    : (runtime?.connectionState ?? "disconnected");
   const stateDotClassName =
     connectionState === "connected"
       ? "bg-success"
@@ -701,6 +712,7 @@ function SavedBackendListRow({
   const descriptorLabel = runtime?.descriptor?.label ?? null;
   const statusTooltip = getSavedBackendStatusTooltip(runtime, record, nowMs);
   const metadataBits = [
+    isPrimaryBackend ? "Primary backend" : null,
     roleLabel,
     record.lastConnectedAt
       ? `Last connected ${formatAccessTimestamp(record.lastConnectedAt)}`
@@ -729,10 +741,24 @@ function SavedBackendListRow({
           ) : null}
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto sm:justify-end">
+          {canUseAsPrimary ? (
+            <Button
+              size="xs"
+              variant="outline"
+              disabled={isPrimaryBackend || isSwitchingPrimaryBackend}
+              onClick={() => void onUseAsPrimary(environmentId)}
+            >
+              {isSwitchingPrimaryBackend
+                ? "Restarting…"
+                : isPrimaryBackend
+                  ? "Primary"
+                  : "Use as primary"}
+            </Button>
+          ) : null}
           <Button
             size="xs"
             variant="outline"
-            disabled={reconnectingEnvironmentId === environmentId}
+            disabled={isPrimaryBackend || reconnectingEnvironmentId === environmentId}
             onClick={() => void onReconnect(environmentId)}
           >
             {reconnectingEnvironmentId === environmentId ? "Reconnecting…" : "Reconnect"}
@@ -740,7 +766,7 @@ function SavedBackendListRow({
           <Button
             size="xs"
             variant="destructive-outline"
-            disabled={removingEnvironmentId === environmentId}
+            disabled={isPrimaryBackend || removingEnvironmentId === environmentId}
             onClick={() => void onRemove(environmentId)}
           >
             {removingEnvironmentId === environmentId ? "Removing…" : "Remove"}
@@ -753,12 +779,12 @@ function SavedBackendListRow({
 
 export function ConnectionsSettings() {
   const desktopBridge = window.desktopBridge;
-  const [currentSessionRole, setCurrentSessionRole] = useState<"owner" | "client" | null>(
-    desktopBridge ? "owner" : null,
-  );
+  const [desktopPrimaryBackendState, setDesktopPrimaryBackendState] =
+    useState<DesktopPrimaryBackendState | null>(null);
+  const [currentSessionRole, setCurrentSessionRole] = useState<"owner" | "client" | null>(null);
   const [currentAuthPolicy, setCurrentAuthPolicy] = useState<
     "desktop-managed-local" | "loopback-browser" | "remote-reachable" | "unsafe-no-auth" | null
-  >(desktopBridge ? null : null);
+  >(null);
   const savedEnvironmentsById = useSavedEnvironmentRegistryStore((state) => state.byId);
   const savedEnvironmentIds = useMemo(
     () =>
@@ -803,11 +829,14 @@ export function ConnectionsSettings() {
   const [removingSavedEnvironmentId, setRemovingSavedEnvironmentId] =
     useState<EnvironmentId | null>(null);
   const [isUpdatingDesktopServerExposure, setIsUpdatingDesktopServerExposure] = useState(false);
+  const [isSwitchingDesktopPrimaryBackend, setIsSwitchingDesktopPrimaryBackend] = useState(false);
   const [pendingDesktopServerExposureMode, setPendingDesktopServerExposureMode] = useState<
     DesktopServerExposureState["mode"] | null
   >(null);
+  const isEmbeddedDesktopBackend = desktopPrimaryBackendState?.mode === "embedded";
   const canManageLocalBackend = currentSessionRole === "owner";
-  const isLocalBackendNetworkAccessible = desktopBridge
+  const canManageDesktopEmbeddedBackend = Boolean(desktopBridge) && isEmbeddedDesktopBackend;
+  const isLocalBackendNetworkAccessible = canManageDesktopEmbeddedBackend
     ? desktopServerExposureState?.mode === "network-accessible"
     : currentAuthPolicy === "remote-reachable";
 
@@ -985,12 +1014,75 @@ export function ConnectionsSettings() {
     }
   }, []);
 
+  const handleUseSavedEnvironmentAsPrimary = useCallback(
+    async (environmentId: EnvironmentId) => {
+      if (!desktopBridge?.useSavedEnvironmentAsPrimaryBackend) return;
+      setIsSwitchingDesktopPrimaryBackend(true);
+      setSavedBackendError(null);
+      try {
+        await desktopBridge.useSavedEnvironmentAsPrimaryBackend(environmentId);
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to switch the primary backend.";
+        setSavedBackendError(message);
+        toastManager.add({
+          type: "error",
+          title: "Could not switch primary backend",
+          description: message,
+        });
+      } finally {
+        setIsSwitchingDesktopPrimaryBackend(false);
+      }
+    },
+    [desktopBridge],
+  );
+
+  const handleUseEmbeddedBackendAsPrimary = useCallback(async () => {
+    if (!desktopBridge?.useEmbeddedBackendAsPrimary) return;
+    setIsSwitchingDesktopPrimaryBackend(true);
+    setSavedBackendError(null);
+    try {
+      await desktopBridge.useEmbeddedBackendAsPrimary();
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to switch back to the local backend.";
+      setSavedBackendError(message);
+      toastManager.add({
+        type: "error",
+        title: "Could not switch primary backend",
+        description: message,
+      });
+    } finally {
+      setIsSwitchingDesktopPrimaryBackend(false);
+    }
+  }, [desktopBridge]);
+
   useEffect(() => {
-    if (desktopBridge) {
-      setCurrentSessionRole("owner");
+    if (!desktopBridge?.getPrimaryBackendState) {
+      setDesktopPrimaryBackendState(null);
       return;
     }
 
+    let cancelled = false;
+    void desktopBridge
+      .getPrimaryBackendState()
+      .then((state) => {
+        if (!cancelled) {
+          setDesktopPrimaryBackendState(state);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDesktopPrimaryBackendState(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [desktopBridge]);
+
+  useEffect(() => {
     let cancelled = false;
     void fetchSessionState()
       .then((session) => {
@@ -1007,7 +1099,7 @@ export function ConnectionsSettings() {
     return () => {
       cancelled = true;
     };
-  }, [desktopBridge]);
+  }, []);
 
   useEffect(() => {
     if (!canManageLocalBackend) return;
@@ -1074,7 +1166,7 @@ export function ConnectionsSettings() {
           },
         },
       );
-    if (desktopBridge) {
+    if (canManageDesktopEmbeddedBackend && desktopBridge) {
       void desktopBridge
         .getServerExposureState()
         .then((state) => {
@@ -1096,7 +1188,7 @@ export function ConnectionsSettings() {
       cancelled = true;
       unsubscribeAuthAccess();
     };
-  }, [canManageLocalBackend, desktopBridge]);
+  }, [canManageDesktopEmbeddedBackend, canManageLocalBackend, desktopBridge]);
 
   useEffect(() => {
     if (canManageLocalBackend) return;
@@ -1113,10 +1205,46 @@ export function ConnectionsSettings() {
   );
   return (
     <SettingsPageContainer>
+      {desktopBridge ? (
+        <SettingsSection title="Desktop startup backend">
+          <SettingsRow
+            title={
+              desktopPrimaryBackendState?.mode === "saved-environment"
+                ? (desktopPrimaryBackendState.label ?? "Remote environment")
+                : "Embedded local backend"
+            }
+            description={
+              desktopPrimaryBackendState?.mode === "saved-environment"
+                ? "This desktop app opens directly against the selected saved environment on startup."
+                : "This desktop app starts and connects to its embedded local backend on startup."
+            }
+            status={
+              savedBackendError ? (
+                <span className="block text-destructive">{savedBackendError}</span>
+              ) : null
+            }
+            control={
+              desktopPrimaryBackendState?.mode === "saved-environment" ? (
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={isSwitchingDesktopPrimaryBackend}
+                  onClick={() => void handleUseEmbeddedBackendAsPrimary()}
+                >
+                  {isSwitchingDesktopPrimaryBackend ? "Restarting…" : "Use local backend"}
+                </Button>
+              ) : (
+                <span className="text-xs text-muted-foreground">Current</span>
+              )
+            }
+          />
+        </SettingsSection>
+      ) : null}
+
       {canManageLocalBackend ? (
         <>
           <SettingsSection title="Manage local backend">
-            {desktopBridge ? (
+            {canManageDesktopEmbeddedBackend && desktopBridge ? (
               <SettingsRow
                 title="Network access"
                 description={
@@ -1202,9 +1330,11 @@ export function ConnectionsSettings() {
               <SettingsRow
                 title="Network access"
                 description={
-                  currentAuthPolicy === "remote-reachable"
-                    ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
-                    : "This backend is only reachable on this machine. Restart it with a non-loopback host to enable remote pairing."
+                  desktopBridge && !canManageDesktopEmbeddedBackend
+                    ? "This desktop app is using a remote primary backend. Network exposure changes must be made where that server is launched."
+                    : currentAuthPolicy === "remote-reachable"
+                      ? "This backend is already configured for remote access. Network exposure changes must be made where the server is launched."
+                      : "This backend is only reachable on this machine. Restart it with a non-loopback host to enable remote pairing."
                 }
                 control={
                   <Tooltip>
@@ -1220,8 +1350,9 @@ export function ConnectionsSettings() {
                       }
                     />
                     <TooltipPopup side="top">
-                      Network exposure changes restart the backend and must be controlled where the
-                      server process is launched.
+                      {desktopBridge && !canManageDesktopEmbeddedBackend
+                        ? "This desktop is using a remote primary backend. Change network exposure on that server."
+                        : "Network exposure changes restart the backend and must be controlled where the server process is launched."}
                     </TooltipPopup>
                   </Tooltip>
                 }
@@ -1411,8 +1542,12 @@ export function ConnectionsSettings() {
           <SavedBackendListRow
             key={environmentId}
             environmentId={environmentId}
+            isPrimaryBackend={desktopPrimaryBackendState?.environmentId === environmentId}
+            canUseAsPrimary={Boolean(desktopBridge)}
+            isSwitchingPrimaryBackend={isSwitchingDesktopPrimaryBackend}
             reconnectingEnvironmentId={reconnectingSavedEnvironmentId}
             removingEnvironmentId={removingSavedEnvironmentId}
+            onUseAsPrimary={handleUseSavedEnvironmentAsPrimary}
             onReconnect={handleReconnectSavedBackend}
             onRemove={handleRemoveSavedBackend}
           />

@@ -169,6 +169,7 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
   return {
     getAppBranding: () => null,
     getLocalEnvironmentBootstrap: () => null,
+    getPrimaryEnvironmentBinding: () => null,
     getClientSettings: async () => null,
     setClientSettings: async () => undefined,
     getSavedEnvironmentRegistry: async () => [],
@@ -176,6 +177,27 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
     getSavedEnvironmentSecret: async () => null,
     setSavedEnvironmentSecret: async () => true,
     removeSavedEnvironmentSecret: async () => undefined,
+    getPrimaryBackendState: async () => ({
+      mode: "embedded",
+      environmentId: null,
+      label: null,
+      httpBaseUrl: null,
+      wsBaseUrl: null,
+    }),
+    useSavedEnvironmentAsPrimaryBackend: async () => ({
+      mode: "saved-environment",
+      environmentId: EnvironmentId.make("environment-local"),
+      label: "Primary",
+      httpBaseUrl: "http://localhost:3000",
+      wsBaseUrl: "ws://localhost:3000",
+    }),
+    useEmbeddedBackendAsPrimary: async () => ({
+      mode: "embedded",
+      environmentId: null,
+      label: null,
+      httpBaseUrl: null,
+      wsBaseUrl: null,
+    }),
     getServerExposureState: async () => ({
       mode: "local-only",
       endpointUrl: null,
