@@ -687,7 +687,7 @@ function createSavedEnvironmentClient(
             lastErrorAt: isoNow(),
           });
         },
-        onClose: (details: { readonly code: number; readonly reason: string }) => {
+        onClose: (details: { readonly code?: number; readonly reason?: string }) => {
           setRuntimeDisconnected(record.environmentId, details.reason);
         },
       },

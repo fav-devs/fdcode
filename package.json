@@ -27,10 +27,11 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/patch-expo-dev-launcher.mjs && node scripts/patch-react-native-nitro-modules.mjs && node scripts/patch-pierre-diffs-utils.mjs",
-    "dev": "bun scripts/dev-runner.ts dev",
+    "dev:all": "bun scripts/dev-runner.ts dev",
     "dev:server": "bun scripts/dev-runner.ts dev:server",
     "dev:web": "bun scripts/dev-runner.ts dev:web",
-    "dev:all": "bun scripts/dev-runner.ts dev -- --filter=@fdcode/mobile",
+    "dev": "bun scripts/dev-runner.ts dev -- --filter=@t3tools/mobile",
+    "dev:tailscale": "PORT=5733 bun scripts/dev-runner.ts dev --host 100.102.67.59 --port 13773 --dev-url http://100.102.67.59:5733/",
     "dev:marketing": "turbo run dev --filter=@t3tools/marketing",
     "dev:desktop": "bun scripts/dev-runner.ts dev:desktop",
     "start": "turbo run start --filter=t3",

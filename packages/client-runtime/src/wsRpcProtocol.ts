@@ -1,33 +1,19 @@
 import { WsRpcGroup } from "@t3tools/contracts";
-import {
-  DEFAULT_RECONNECT_BACKOFF,
-  getReconnectDelayMs,
-  type WsProtocolLifecycleHandlers,
-} from "@t3tools/client-runtime";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
-
 import {
-<<<<<<<< HEAD:apps/web/src/rpc/protocol.ts
-  acknowledgeRpcRequest,
-  clearAllTrackedRpcRequests,
-  trackRpcRequestSent,
-} from "./requestLatencyState";
-import {
-  recordWsConnectionAttempt,
-  recordWsConnectionClosed,
-  recordWsConnectionErrored,
-  recordWsConnectionOpened,
-} from "./wsConnectionState";
-========
   DEFAULT_RECONNECT_BACKOFF,
   getReconnectDelayMs,
   type ReconnectBackoffConfig,
 } from "./reconnectBackoff.ts";
->>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcProtocol.ts
 
-export type { WsProtocolLifecycleHandlers };
+export interface WsProtocolLifecycleHandlers {
+  readonly onAttempt?: (socketUrl: string) => void;
+  readonly onOpen?: () => void;
+  readonly onError?: (message: string) => void;
+  readonly onClose?: (details: { readonly code?: number; readonly reason?: string }) => void;
+}
 
 export interface WsRpcProtocolRequestTelemetry {
   readonly onRequestSent?: (requestId: string, tag: string) => void;
@@ -174,17 +160,11 @@ export function createWsRpcProtocolLayer(
   const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(
     Layer.provide(trackingWebSocketConstructorLayer),
   );
-<<<<<<<< HEAD:apps/web/src/rpc/protocol.ts
-  const retryPolicy = Schedule.addDelay(
-    Schedule.recurs(DEFAULT_RECONNECT_BACKOFF.maxRetries!),
-    (retryCount) => Effect.succeed(Duration.millis(getReconnectDelayMs(retryCount) ?? 0)),
-========
 
   const baseSchedule =
     backoff.maxRetries === null ? Schedule.forever : Schedule.recurs(backoff.maxRetries);
   const retryPolicy = Schedule.addDelay(baseSchedule, (retryCount) =>
     Effect.succeed(Duration.millis(getReconnectDelayMs(retryCount, backoff) ?? 0)),
->>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcProtocol.ts
   );
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,

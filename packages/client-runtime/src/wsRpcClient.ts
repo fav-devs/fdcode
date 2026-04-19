@@ -1,19 +1,17 @@
 import {
+  type GitActionProgressEvent,
+  type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type GitStatusResult,
   type GitStatusStreamEvent,
+  type LocalApi,
   ORCHESTRATION_WS_METHODS,
+  type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
-import type { WsRpcClient } from "@t3tools/client-runtime";
 import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
+import { Effect, Stream } from "effect";
 
-<<<<<<<< HEAD:apps/web/src/rpc/wsRpcClient.ts
-import { resetWsReconnectBackoff } from "./wsConnectionState";
-import { WsTransport } from "./wsTransport";
-
-export type { WsRpcClient };
-========
 import { type WsRpcProtocolClient } from "./wsRpcProtocol.ts";
 import { WsTransport } from "./wsTransport.ts";
 
@@ -123,7 +121,6 @@ export interface WsRpcClient {
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
 }
->>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcClient.ts
 
 export interface CreateWsRpcClientOptions {
   /** Runs immediately before `transport.reconnect()` (e.g. reset reconnect UI/backoff state). */

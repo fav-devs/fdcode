@@ -14,7 +14,7 @@ import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
 import { Toggle } from "../ui/toggle";
-import { SidebarTrigger } from "../ui/sidebar";
+import { SidebarHeaderTrigger } from "../ui/sidebar";
 import { OpenInPicker } from "./OpenInPicker";
 
 interface ChatHeaderProps {
@@ -69,11 +69,11 @@ export const ChatHeader = memo(function ChatHeader({
   onToggleDiff,
 }: ChatHeaderProps) {
   return (
-    <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+    <div className="@container/header-actions flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
       <div className="flex min-w-0 flex-wrap items-center gap-2 overflow-hidden sm:flex-1 sm:flex-nowrap sm:gap-3">
-        <SidebarTrigger className="size-7 shrink-0 md:hidden" />
+        <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
         <h2
-          className="min-w-0 flex-1 basis-40 truncate text-sm font-medium text-foreground"
+          className="min-w-0 flex-1 basis-40 truncate text-[15px] font-semibold tracking-tight text-foreground"
           title={activeThreadTitle}
         >
           {activeThreadTitle}
@@ -92,7 +92,7 @@ export const ChatHeader = memo(function ChatHeader({
           </Badge>
         )}
       </div>
-      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
+      <div className="flex min-w-0 flex-wrap items-center justify-start gap-2 rounded-2xl border border-border/60 bg-background/68 px-2 py-1 shadow-sm backdrop-blur sm:shrink-0 sm:justify-end @3xl/header-actions:gap-3">
         {activeProjectScripts && (
           <ProjectScriptsControl
             scripts={activeProjectScripts}
