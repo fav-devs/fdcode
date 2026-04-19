@@ -20,6 +20,7 @@ import {
   Context,
   Console,
 } from "effect";
+import OS from "node:os";
 
 import { ServerConfig } from "./config.ts";
 import { Keybindings } from "./keybindings.ts";
@@ -165,6 +166,7 @@ export const resolveWelcomeBase = Effect.gen(function* () {
 
   return {
     cwd: serverConfig.cwd,
+    homeDir: OS.homedir(),
     projectName,
   } as const;
 });

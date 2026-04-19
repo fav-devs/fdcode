@@ -112,6 +112,7 @@ it.effect("resolveWelcomeBase derives cwd and project name from server config", 
 
     assert.deepStrictEqual(welcome, {
       cwd: "/tmp/startup-project",
+      homeDir: welcome.homeDir,
       projectName: "startup-project",
     });
   }),

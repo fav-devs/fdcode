@@ -46,6 +46,9 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         );
 
     if (command.type === "project.create") {
+      if (command.kind === "chat") {
+        return command satisfies OrchestrationCommand;
+      }
       return {
         ...command,
         workspaceRoot: yield* normalizeProjectWorkspaceRootForCreate(
