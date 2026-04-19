@@ -30,10 +30,7 @@ function CpuRamStats() {
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            className="flex items-center gap-2 rounded px-1 hover:bg-white/5"
-          >
+          <button type="button" className="flex items-center gap-2 rounded px-8 hover:bg-white/5">
             <StatChip label="CPU" value={`${cpu}%`} warn={cpu > 60} high={cpu > 80} />
             <Divider />
             <StatChip
@@ -95,7 +92,7 @@ export const AppStatusBar = memo(function AppStatusBar() {
   const projectCount = useStore((s) => selectProjectsAcrossEnvironments(s).length);
 
   return (
-    <div className="flex h-7 shrink-0 items-center gap-2.5 border-t border-border/30 bg-black/[0.03] px-4 text-[11px] text-muted-foreground/70 dark:bg-white/[0.02]">
+    <div className="flex h-7 shrink-0 items-center gap-2.5 border-t border-border/30 bg-black/[0.03] px-8 text-[11px] text-muted-foreground/70 dark:bg-white/[0.02]">
       <div
         className={cn(
           "size-1.5 shrink-0 rounded-full",

@@ -1,5 +1,4 @@
 import { AppStatusBar } from "./AppStatusBar";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
 import { SidebarHeaderTrigger, SidebarInset } from "./ui/sidebar";
 import { isElectron } from "../env";
 import { cn } from "~/lib/utils";
@@ -16,30 +15,24 @@ export function NoActiveThreadState() {
               : "py-2 sm:py-2.5",
           )}
         >
-          {isElectron ? (
-            <span className="text-xs text-muted-foreground/50 wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]">
-              No active thread
-            </span>
-          ) : (
-            <div className="flex items-center gap-2">
-              <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
-              <span className="text-sm font-medium text-foreground md:text-muted-foreground/60">
-                No active thread
-              </span>
-            </div>
+          {!isElectron && (
+            <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
           )}
         </header>
 
-        <Empty className="flex-1 px-6 pb-8 pt-6">
-          <div className="w-full max-w-xl rounded-[28px] border border-border/60 bg-background/62 px-8 py-12 shadow-[0_24px_60px_-32px_rgba(0,0,0,0.72)] backdrop-blur">
-            <EmptyHeader className="max-w-none">
-              <EmptyTitle className="text-foreground text-xl">Pick a thread to continue</EmptyTitle>
-              <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Select an existing thread or create a new one to get started.
-              </EmptyDescription>
-            </EmptyHeader>
+        <div className="flex flex-1 items-center justify-center px-3 sm:px-5">
+          <div className="flex w-full max-w-3xl flex-col items-center gap-4 px-6 pb-5 text-center select-none">
+            <img
+              alt="T3 Code logo"
+              className="size-12 rounded-lg object-contain"
+              draggable={false}
+              src="/favicon-32x32.png"
+            />
+            <h2 className="text-[26px] font-normal leading-[1.15] tracking-[-0.015em] text-foreground/95 sm:text-[30px]">
+              What should we work on?
+            </h2>
           </div>
-        </Empty>
+        </div>
       </div>
       <AppStatusBar />
     </SidebarInset>
