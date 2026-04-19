@@ -2,14 +2,7 @@ import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pie
 import type { ProjectEntry } from "@t3tools/contracts";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch, useParams } from "@tanstack/react-router";
-import {
-  FileIcon,
-  FolderIcon,
-  FolderOpenIcon,
-  PencilIcon,
-  SaveIcon,
-  XIcon,
-} from "lucide-react";
+import { FileIcon, FolderIcon, FolderOpenIcon, PencilIcon, SaveIcon, XIcon } from "lucide-react";
 import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 import { useTheme } from "../hooks/useTheme";
@@ -198,13 +191,7 @@ function FileTreeRow({
 
 // ─── File content viewer/editor ────────────────────────────────────────────
 
-function FileContentView({
-  cwd,
-  filePath,
-}: {
-  cwd: string;
-  filePath: string;
-}) {
+function FileContentView({ cwd, filePath }: { cwd: string; filePath: string }) {
   const { resolvedTheme } = useTheme();
   const themeName = resolveDiffThemeName(resolvedTheme);
   const language = detectLanguage(filePath);
@@ -352,6 +339,7 @@ export default function FilePanel() {
   const navigate = useNavigate();
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
+  const autoExpandedCwdRef = useRef<string | null>(null);
 
   const routeThreadRef = useParams({
     strict: false,
@@ -393,6 +381,19 @@ export default function FilePanel() {
 
   const allEntries = entriesResult?.entries ?? [];
   const sortedEntries = useMemo(() => sortEntries([...allEntries]), [allEntries]);
+
+  // Auto-expand root-level directories when a workspace first loads so files are immediately visible.
+  // Reset when cwd changes (thread switch).
+  useEffect(() => {
+    if (!cwd || allEntries.length === 0) return;
+    if (autoExpandedCwdRef.current === cwd) return;
+    autoExpandedCwdRef.current = cwd;
+    const rootDirs = allEntries
+      .filter((entry) => entry.kind === "directory" && !entry.parentPath)
+      .map((entry) => entry.path);
+    setExpandedDirs(new Set(rootDirs));
+    setSearchQuery("");
+  }, [allEntries, cwd]);
 
   const visibleEntries = useMemo(() => {
     if (searchQuery.trim()) return sortedEntries;
