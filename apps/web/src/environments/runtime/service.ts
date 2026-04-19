@@ -64,6 +64,7 @@ import { WsTransport } from "~/rpc/wsTransport";
 import { derivePhysicalProjectKey } from "../../logicalProject";
 import { subscribeTerminalMetadata, terminalSessionManager } from "../../terminalSessionState";
 import { resetWsReconnectBackoff } from "~/rpc/wsConnectionState";
+import { startPortsStateSync } from "~/rpc/portsState";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -86,6 +87,7 @@ const environmentConnections = new Map<EnvironmentId, EnvironmentConnection>();
 const environmentConnectionListeners = new Set<() => void>();
 const threadDetailSubscriptions = new Map<string, ThreadDetailSubscriptionEntry>();
 const terminalMetadataSubscriptions = new Map<EnvironmentId, () => void>();
+const portsStateSubscriptions = new Map<EnvironmentId, () => void>();
 
 let activeService: EnvironmentServiceState | null = null;
 let needsProviderInvalidation = false;
@@ -754,6 +756,11 @@ function registerConnection(connection: EnvironmentConnection): EnvironmentConne
       client: connection.client,
     }),
   );
+  portsStateSubscriptions.get(connection.environmentId)?.();
+  portsStateSubscriptions.set(
+    connection.environmentId,
+    startPortsStateSync({ client: connection.client }),
+  );
   emitEnvironmentConnectionRegistryChange();
   return connection;
 }
@@ -768,6 +775,8 @@ async function removeConnection(environmentId: EnvironmentId): Promise<boolean> 
   environmentConnections.delete(environmentId);
   terminalMetadataSubscriptions.get(environmentId)?.();
   terminalMetadataSubscriptions.delete(environmentId);
+  portsStateSubscriptions.get(environmentId)?.();
+  portsStateSubscriptions.delete(environmentId);
   terminalSessionManager.invalidateEnvironment(environmentId);
   emitEnvironmentConnectionRegistryChange();
   await connection.dispose();
@@ -1103,6 +1112,10 @@ export async function resetEnvironmentServiceForTests(): Promise<void> {
     unsubscribe();
   }
   terminalMetadataSubscriptions.clear();
+  for (const unsubscribe of portsStateSubscriptions.values()) {
+    unsubscribe();
+  }
+  portsStateSubscriptions.clear();
   terminalSessionManager.reset();
   await Promise.all(
     [...environmentConnections.keys()].map((environmentId) => removeConnection(environmentId)),

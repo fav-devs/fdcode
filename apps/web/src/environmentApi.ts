@@ -39,6 +39,12 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       preparePullRequestThread: rpcClient.git.preparePullRequestThread,
       getReviewDiffs: rpcClient.git.getReviewDiffs,
     },
+    ports: {
+      detect: (input) => rpcClient.ports.detect(input ?? {}),
+      forwardCreate: (input) => rpcClient.ports.forwardCreate(input),
+      forwardRemove: (input) => rpcClient.ports.forwardRemove(input),
+      onForwards: (callback, options) => rpcClient.ports.onForwards(callback, options),
+    },
     orchestration: {
       dispatchCommand: rpcClient.orchestration.dispatchCommand,
       getTurnDiff: rpcClient.orchestration.getTurnDiff,
