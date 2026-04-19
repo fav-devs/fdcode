@@ -83,6 +83,10 @@
     "./composerTrigger": {
       "types": "./src/composerTrigger.ts",
       "import": "./src/composerTrigger.ts"
+    },
+    "./chatThreads": {
+      "types": "./src/chatThreads.ts",
+      "import": "./src/chatThreads.ts"
     }
   },
   "scripts": {
