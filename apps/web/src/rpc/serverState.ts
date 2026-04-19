@@ -262,6 +262,10 @@ export function useServerConfig(): ServerConfig | null {
   return useAtomValue(serverConfigAtom);
 }
 
+export function useServerWelcome(): ServerLifecycleWelcomePayload | null {
+  return useAtomValue(welcomeAtom);
+}
+
 export function useServerSettings(): ServerSettings {
   return useAtomValue(serverConfigAtom, selectSettings);
 }

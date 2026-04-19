@@ -90,6 +90,7 @@ function makeState(thread: Thread): AppState {
   const project = {
     id: projectId,
     environmentId: thread.environmentId,
+    kind: "project" as const,
     name: "Project",
     cwd: "/tmp/project",
     defaultModelSelection: {
@@ -460,6 +461,7 @@ describe("incremental orchestration updates", () => {
         [originalProjectId]: {
           id: originalProjectId,
           environmentId: localEnvironmentId,
+          kind: "project" as const,
           name: "Project",
           cwd: "/tmp/project",
           defaultModelSelection: {
@@ -515,6 +517,7 @@ describe("incremental orchestration updates", () => {
         [originalProjectId]: {
           id: originalProjectId,
           environmentId: localEnvironmentId,
+          kind: "project" as const,
           name: "Project 1",
           cwd: "/tmp/project-1",
           defaultModelSelection: {
@@ -528,6 +531,7 @@ describe("incremental orchestration updates", () => {
         [recreatedProjectId]: {
           id: recreatedProjectId,
           environmentId: localEnvironmentId,
+          kind: "project" as const,
           name: "Project 2",
           cwd: "/tmp/project-2",
           defaultModelSelection: {

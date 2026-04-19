@@ -14,6 +14,7 @@ import type {
   ProviderKind,
   CheckpointRef,
   ProviderInteractionMode,
+  ProjectKind,
   RuntimeMode,
 } from "@t3tools/contracts";
 
@@ -83,6 +84,7 @@ export interface TurnDiffSummary {
 export interface Project {
   id: ProjectId;
   environmentId: EnvironmentId;
+  kind: ProjectKind;
   name: string;
   cwd: string;
   repositoryIdentity?: RepositoryIdentity | null;

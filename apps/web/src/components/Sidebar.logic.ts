@@ -259,6 +259,44 @@ export function getSidebarThreadIdsToPrewarm<TThreadId>(
   return visibleThreadIds.slice(0, Math.max(0, limit));
 }
 
+export function getPinnedThreadsForSidebar<TThread>(input: {
+  threads: readonly TThread[];
+  pinnedThreadKeys: readonly string[];
+  getKey: (thread: TThread) => string;
+}): TThread[] {
+  const { getKey, pinnedThreadKeys, threads } = input;
+  const threadByKey = new Map(threads.map((thread) => [getKey(thread), thread] as const));
+  const seen = new Set<string>();
+  const pinnedThreads: TThread[] = [];
+
+  for (const threadKey of pinnedThreadKeys) {
+    if (seen.has(threadKey)) {
+      continue;
+    }
+    seen.add(threadKey);
+    const thread = threadByKey.get(threadKey);
+    if (thread) {
+      pinnedThreads.push(thread);
+    }
+  }
+
+  return pinnedThreads;
+}
+
+export function getUnpinnedThreadsForSidebar<TThread>(input: {
+  threads: readonly TThread[];
+  pinnedThreadKeys: readonly string[];
+  getKey: (thread: TThread) => string;
+}): TThread[] {
+  const { getKey, pinnedThreadKeys, threads } = input;
+  if (pinnedThreadKeys.length === 0) {
+    return [...threads];
+  }
+
+  const pinnedThreadKeySet = new Set(pinnedThreadKeys);
+  return threads.filter((thread) => !pinnedThreadKeySet.has(getKey(thread)));
+}
+
 export function resolveAdjacentThreadId<T>(input: {
   threadIds: readonly T[];
   currentThreadId: T | null;
