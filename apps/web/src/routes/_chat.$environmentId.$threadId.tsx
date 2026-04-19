@@ -1,6 +1,7 @@
 import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from "react";
 
+import { AppStatusBar } from "../components/AppStatusBar";
 import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { DiffWorkerPoolProvider } from "../components/DiffWorkerPoolProvider";
@@ -240,7 +241,7 @@ function ChatThreadRouteView() {
   if (!shouldUseDiffSheet) {
     return (
       <>
-        <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground">
+        <SidebarInset className="h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)] min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground">
           <ChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
@@ -248,6 +249,7 @@ function ChatThreadRouteView() {
             reserveTitleBarControlInset={!diffOpen}
             routeKind="server"
           />
+          <AppStatusBar />
         </SidebarInset>
         <DiffPanelInlineSidebar
           diffOpen={diffOpen}
@@ -261,13 +263,14 @@ function ChatThreadRouteView() {
 
   return (
     <>
-      <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground">
+      <SidebarInset className="h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)] min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground">
         <ChatView
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
           onDiffPanelOpen={markDiffOpened}
           routeKind="server"
         />
+        <AppStatusBar />
       </SidebarInset>
       <RightPanelSheet open={diffOpen} onClose={closeDiff}>
         {shouldRenderDiffContent ? <LazyDiffPanel mode="sheet" /> : null}
