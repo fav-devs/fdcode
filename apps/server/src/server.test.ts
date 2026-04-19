@@ -83,6 +83,8 @@ import { ServerLifecycleEvents, type ServerLifecycleEventsShape } from "./server
 import { ServerRuntimeStartup, type ServerRuntimeStartupShape } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "./serverSettings.ts";
 import { TerminalManager, type TerminalManagerShape } from "./terminal/Services/Manager.ts";
+import { PortsManager, type PortsManagerShape } from "./ports/PortsManager.ts";
+import { PortsError } from "@t3tools/contracts";
 import {
   BrowserTraceCollector,
   type BrowserTraceCollectorShape,
@@ -327,6 +329,7 @@ const buildAppUnderTest = (options?: {
     gitStatusBroadcaster?: Partial<GitStatusBroadcasterShape>;
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunnerShape>;
     terminalManager?: Partial<TerminalManagerShape>;
+    portsManager?: Partial<PortsManagerShape>;
     orchestrationEngine?: Partial<OrchestrationEngineShape>;
     projectionSnapshotQuery?: Partial<ProjectionSnapshotQueryShape>;
     checkpointDiffQuery?: Partial<CheckpointDiffQueryShape>;
@@ -451,6 +454,16 @@ const buildAppUnderTest = (options?: {
       Layer.provide(
         Layer.mock(TerminalManager)({
           ...options?.layers?.terminalManager,
+        }),
+      ),
+      Layer.provide(
+        Layer.mock(PortsManager)({
+          detect: () => Effect.succeed({ ports: [] }),
+          createForward: () => Effect.fail(new PortsError({ reason: "not implemented in tests" })),
+          removeForward: () => Effect.void,
+          getForwards: Effect.succeed([]),
+          subscribeMetadata: (_listener) => Effect.succeed(() => undefined),
+          ...options?.layers?.portsManager,
         }),
       ),
       Layer.provide(

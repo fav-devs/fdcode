@@ -34,6 +34,7 @@ import { GitHubCliLive } from "./git/Layers/GitHubCli.ts";
 import { GitStatusBroadcasterLive } from "./git/Layers/GitStatusBroadcaster.ts";
 import { RoutingTextGenerationLive } from "./git/Layers/RoutingTextGeneration.ts";
 import { TerminalManagerLive } from "./terminal/Layers/Manager.ts";
+import { PortsManagerLive } from "./ports/PortsManager.ts";
 import { GitManagerLive } from "./git/Layers/GitManager.ts";
 import { KeybindingsLive } from "./keybindings.ts";
 import { ServerRuntimeStartup, ServerRuntimeStartupLive } from "./serverRuntimeStartup.ts";
@@ -198,6 +199,8 @@ const GitLayerLive = Layer.empty.pipe(
 
 const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
 
+const PortsLayerLive = PortsManagerLive;
+
 const WorkspaceEntriesLayerLive = WorkspaceEntriesLive.pipe(
   Layer.provide(WorkspacePathsLive),
   Layer.provideMerge(GitCoreLive),
@@ -235,6 +238,7 @@ const RuntimeDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(GitLayerLive),
   Layer.provideMerge(ProviderRuntimeLayerLive),
   Layer.provideMerge(TerminalLayerLive),
+  Layer.provideMerge(PortsLayerLive),
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(KeybindingsLive),
   Layer.provideMerge(ProviderRegistryLive),

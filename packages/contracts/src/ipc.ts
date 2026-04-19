@@ -58,6 +58,14 @@ import type {
 import type { EnvironmentId } from "./baseSchemas.ts";
 import { EditorId } from "./editor.ts";
 import { ServerSettings, type ClientSettings, type ServerSettingsPatch } from "./settings.ts";
+import type {
+  PortForward,
+  PortForwardMetadataStreamEvent,
+  PortsDetectInput,
+  PortsDetectResult,
+  PortsForwardCreateInput,
+  PortsForwardRemoveInput,
+} from "./ports.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
@@ -309,6 +317,15 @@ export interface EnvironmentApi {
       options?: {
         onResubscribe?: () => void;
       },
+    ) => () => void;
+  };
+  ports: {
+    detect: (input?: PortsDetectInput) => Promise<PortsDetectResult>;
+    forwardCreate: (input: PortsForwardCreateInput) => Promise<PortForward>;
+    forwardRemove: (input: PortsForwardRemoveInput) => Promise<void>;
+    onForwards: (
+      callback: (event: PortForwardMetadataStreamEvent) => void,
+      options?: { onResubscribe?: () => void },
     ) => () => void;
   };
   orchestration: {

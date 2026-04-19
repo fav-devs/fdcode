@@ -8,6 +8,12 @@ import {
   ORCHESTRATION_WS_METHODS,
   type ServerSettingsPatch,
   WS_METHODS,
+  type PortForward,
+  type PortForwardMetadataStreamEvent,
+  type PortsDetectInput,
+  type PortsDetectResult,
+  type PortsForwardCreateInput,
+  type PortsForwardRemoveInput,
 } from "@t3tools/contracts";
 import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
 import { Effect, Stream } from "effect";
@@ -114,6 +120,15 @@ export interface WsRpcClient {
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
     readonly subscribeResourceStats: RpcStreamMethod<typeof WS_METHODS.subscribeResourceStats>;
+  };
+  readonly ports: {
+    readonly detect: (input?: PortsDetectInput) => Promise<PortsDetectResult>;
+    readonly forwardCreate: (input: PortsForwardCreateInput) => Promise<PortForward>;
+    readonly forwardRemove: (input: PortsForwardRemoveInput) => Promise<void>;
+    readonly onForwards: (
+      listener: (event: PortForwardMetadataStreamEvent) => void,
+      options?: StreamSubscriptionOptions,
+    ) => () => void;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -255,6 +270,19 @@ export function createWsRpcClient(
       subscribeResourceStats: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeResourceStats]({}),
+          listener,
+          options,
+        ),
+    },
+    ports: {
+      detect: (input) => transport.request((client) => client[WS_METHODS.portsDetect](input ?? {})),
+      forwardCreate: (input) =>
+        transport.request((client) => client[WS_METHODS.portsForwardCreate](input)),
+      forwardRemove: (input) =>
+        transport.request((client) => client[WS_METHODS.portsForwardRemove](input)),
+      onForwards: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribePortForwards]({}),
           listener,
           options,
         ),

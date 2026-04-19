@@ -85,6 +85,15 @@ import {
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
+import {
+  PortForward,
+  PortForwardMetadataStreamEvent,
+  PortsDetectInput,
+  PortsDetectResult,
+  PortsError,
+  PortsForwardCreateInput,
+  PortsForwardRemoveInput,
+} from "./ports.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -130,6 +139,12 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+
+  // Port forwarding methods
+  portsDetect: "ports.detect",
+  portsForwardCreate: "ports.forward.create",
+  portsForwardRemove: "ports.forward.remove",
+  subscribePortForwards: "subscribePortForwards",
 
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
@@ -400,6 +415,29 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+export const WsPortsDetectRpc = Rpc.make(WS_METHODS.portsDetect, {
+  payload: PortsDetectInput,
+  success: PortsDetectResult,
+  error: PortsError,
+});
+
+export const WsPortsForwardCreateRpc = Rpc.make(WS_METHODS.portsForwardCreate, {
+  payload: PortsForwardCreateInput,
+  success: PortForward,
+  error: PortsError,
+});
+
+export const WsPortsForwardRemoveRpc = Rpc.make(WS_METHODS.portsForwardRemove, {
+  payload: PortsForwardRemoveInput,
+  error: PortsError,
+});
+
+export const WsSubscribePortForwardsRpc = Rpc.make(WS_METHODS.subscribePortForwards, {
+  payload: Schema.Struct({}),
+  success: PortForwardMetadataStreamEvent,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerGetConfigRpc,
   WsServerRefreshProvidersRpc,
@@ -443,4 +481,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
+  WsPortsDetectRpc,
+  WsPortsForwardCreateRpc,
+  WsPortsForwardRemoveRpc,
+  WsSubscribePortForwardsRpc,
 );

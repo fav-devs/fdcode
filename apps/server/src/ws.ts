@@ -63,6 +63,7 @@ import { ServerLifecycleEvents } from "./serverLifecycleEvents.ts";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup.ts";
 import { ServerSettingsService } from "./serverSettings.ts";
 import { TerminalManager } from "./terminal/Services/Manager.ts";
+import { PortsManager } from "./ports/PortsManager.ts";
 import { WorkspaceEntries } from "./workspace/Services/WorkspaceEntries.ts";
 import { WorkspaceFileSystem } from "./workspace/Services/WorkspaceFileSystem.ts";
 import { WorkspacePathOutsideRootError } from "./workspace/Services/WorkspacePaths.ts";
@@ -156,6 +157,7 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
       const git = yield* GitCore;
       const gitStatusBroadcaster = yield* GitStatusBroadcaster;
       const terminalManager = yield* TerminalManager;
+      const portsManager = yield* PortsManager;
       const providerRegistry = yield* ProviderRegistry;
       const config = yield* ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents;
@@ -1008,6 +1010,38 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               ),
             ),
             { "rpc.aggregate": "terminal" },
+          ),
+        [WS_METHODS.portsDetect]: (input) =>
+          observeRpcEffect(WS_METHODS.portsDetect, portsManager.detect(input), {
+            "rpc.aggregate": "ports",
+          }),
+        [WS_METHODS.portsForwardCreate]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.portsForwardCreate,
+            portsManager.createForward({
+              remotePort: input.remotePort,
+              ...(input.remoteHost !== undefined ? { remoteHost: input.remoteHost } : {}),
+              ...(input.localPort !== undefined ? { localPort: input.localPort } : {}),
+              ...(input.label !== undefined ? { label: input.label } : {}),
+            }),
+            { "rpc.aggregate": "ports" },
+          ),
+        [WS_METHODS.portsForwardRemove]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.portsForwardRemove,
+            portsManager.removeForward(input.forwardId),
+            { "rpc.aggregate": "ports" },
+          ),
+        [WS_METHODS.subscribePortForwards]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribePortForwards,
+            Stream.callback((queue) =>
+              Effect.acquireRelease(
+                portsManager.subscribeMetadata((event) => Queue.offer(queue, event)),
+                (unsubscribe) => Effect.sync(unsubscribe),
+              ),
+            ),
+            { "rpc.aggregate": "ports" },
           ),
         [WS_METHODS.subscribeServerConfig]: (_input) =>
           observeRpcStreamEffect(
