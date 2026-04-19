@@ -10,8 +10,8 @@ import { selectEnvironmentState, useStore } from "../store";
 function ChatIndexRouteView() {
   const welcome = useServerWelcome();
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const bootstrapComplete = useStore((store) =>
-    selectEnvironmentState(store, primaryEnvironmentId).bootstrapComplete,
+  const bootstrapComplete = useStore(
+    (store) => selectEnvironmentState(store, primaryEnvironmentId).bootstrapComplete,
   );
   const { handleNewThread } = useNewThreadHandler();
   const handleNewThreadRef = useRef(handleNewThread);
@@ -26,9 +26,7 @@ function ChatIndexRouteView() {
       const { ensureHomeChatProject } = await import("../lib/chatProjects");
       const projectId = await ensureHomeChatProject(homeDir, environmentId);
       if (!projectId) return;
-      await handleNewThreadRef.current(
-        scopeProjectRef(environmentId as never, projectId as never),
-      );
+      await handleNewThreadRef.current(scopeProjectRef(environmentId as never, projectId as never));
     })();
   }, [bootstrapComplete, welcome?.cwd, primaryEnvironmentId]);
 

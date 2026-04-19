@@ -575,9 +575,7 @@ export function flattenOpenCodeModels(
   input: OpenCodeInventory,
 ): ReadonlyArray<ServerProviderModel> {
   const connected = new Set(input.providerList.connected);
-  const officialProviderIds = new Set(
-    Object.keys(OPENCODE_MANAGED_PROVIDER_DESCRIPTORS),
-  );
+  const officialProviderIds = new Set(Object.keys(OPENCODE_MANAGED_PROVIDER_DESCRIPTORS));
   const models: Array<ServerProviderModel> = [];
 
   for (const provider of input.providerList.all) {
