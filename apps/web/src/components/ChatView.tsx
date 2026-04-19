@@ -616,9 +616,6 @@ export default function ChatView(props: ChatViewProps) {
   );
   const setStoreThreadError = useStore((store) => store.setError);
   const markThreadVisited = useUiStateStore((store) => store.markThreadVisited);
-  const activeThreadLastVisitedAt = useUiStateStore((store) =>
-    routeKind === "server" ? store.threadLastVisitedAtById[routeThreadKey] : undefined,
-  );
   const settings = useSettings();
   const setStickyComposerModelSelection = useComposerDraftStore(
     (store) => store.setStickyModelSelection,
@@ -1021,15 +1018,18 @@ export default function ChatView(props: ChatViewProps) {
     if (!activeLatestTurn?.completedAt) return;
     const turnCompletedAt = Date.parse(activeLatestTurn.completedAt);
     if (Number.isNaN(turnCompletedAt)) return;
-    const lastVisitedAt = activeThreadLastVisitedAt ? Date.parse(activeThreadLastVisitedAt) : NaN;
+    const lastVisitedAt = (() => {
+      const val = useUiStateStore.getState().threadLastVisitedAtById[routeThreadKey];
+      return val ? Date.parse(val) : NaN;
+    })();
     if (!Number.isNaN(lastVisitedAt) && lastVisitedAt >= turnCompletedAt) return;
 
     markThreadVisited(scopedThreadKey(scopeThreadRef(serverThread.environmentId, serverThread.id)));
   }, [
     activeLatestTurn?.completedAt,
-    activeThreadLastVisitedAt,
     latestTurnSettled,
     markThreadVisited,
+    routeThreadKey,
     serverThread?.environmentId,
     serverThread?.id,
   ]);
@@ -1360,7 +1360,7 @@ export default function ChatView(props: ChatViewProps) {
     [activeThread?.proposedPlans, timelineMessages, workLogEntries],
   );
   const serverWelcome = useServerWelcome();
-  const homeDir = serverWelcome?.homeDir ?? null;
+  const homeDir = serverWelcome?.cwd ?? null;
   const isCenteredEmptyLanding = timelineEntries.length === 0;
   const isHomeChatLanding =
     isCenteredEmptyLanding && homeDir != null && isHomeChatContainerProject(activeProject, homeDir);
@@ -3231,7 +3231,7 @@ export default function ChatView(props: ChatViewProps) {
               <div className="flex flex-1 items-center justify-center px-3 sm:px-5">
                 <div className="flex w-full max-w-3xl flex-col items-center gap-4 px-6 pb-5 text-center select-none">
                   <img
-                    alt="T3 Code logo"
+                    alt="fd code logo"
                     className="size-12 rounded-lg object-contain"
                     draggable={false}
                     src="/favicon-32x32.png"
