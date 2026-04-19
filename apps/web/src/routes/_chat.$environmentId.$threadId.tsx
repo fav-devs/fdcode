@@ -121,8 +121,10 @@ const DiffPanelInlineSidebar = (props: {
     >
       <Sidebar
         side="right"
+        variant="inset"
         collapsible="offcanvas"
-        className="border-l border-border bg-card text-foreground"
+        className="md:p-3"
+        innerClassName="overflow-hidden rounded-[28px] border border-border/70 bg-[linear-gradient(180deg,color-mix(in_srgb,var(--card)_96%,black_4%),color-mix(in_srgb,var(--card)_90%,black_10%))] shadow-[0_28px_80px_-36px_rgba(0,0,0,0.75)] backdrop-blur-xl text-foreground"
         resizable={{
           minWidth: DIFF_INLINE_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: shouldAcceptInlineSidebarWidth,
