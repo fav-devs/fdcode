@@ -3,6 +3,7 @@ import type { TurnId } from "@t3tools/contracts";
 import type { ChatRightPanel } from "../chatRightPanel";
 import type { DiffRouteSearch } from "../diffRouteSearch";
 import type { FileRouteSearch } from "../fileRouteSearch";
+import type { PortsRouteSearch } from "../portsRouteSearch";
 
 export interface ChatPanelStateSnapshot {
   panel: ChatRightPanel | null;
@@ -22,10 +23,17 @@ export interface ChatPanelStatePatch {
   lastOpenPanel?: ChatRightPanel;
 }
 
-export type ThreadRouteSearch = DiffRouteSearch & FileRouteSearch;
+export type ThreadRouteSearch = DiffRouteSearch & FileRouteSearch & PortsRouteSearch;
 
 export function resolveRoutePanelState(search: ThreadRouteSearch): ChatPanelStatePatch {
-  const panel: ChatRightPanel | null = search.files === "1" ? "files" : search.diff === "1" ? "diff" : null;
+  const panel: ChatRightPanel | null =
+    search.files === "1"
+      ? "files"
+      : search.diff === "1"
+        ? "diff"
+        : search.ports === "1"
+          ? "ports"
+          : null;
 
   return {
     panel,

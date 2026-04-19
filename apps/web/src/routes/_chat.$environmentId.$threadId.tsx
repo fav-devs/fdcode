@@ -1,4 +1,6 @@
-import { createFileRoute, retainSearchParams, useNavigate } from "@tanstack/react-router";
+import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import type { EnvironmentId } from "@t3tools/contracts";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import FilePanel from "../components/FilePanel";
 import { cn } from "../lib/utils";
@@ -13,34 +15,38 @@ import {
   DiffPanelShell,
   type DiffPanelMode,
 } from "../components/DiffPanelShell";
+import type { ChatRightPanel } from "../chatRightPanel";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
-import {
-  type DiffRouteSearch,
-  parseDiffRouteSearch,
-  stripDiffSearchParams,
-} from "../diffRouteSearch";
-import {
-  type FileRouteSearch,
-  parseFileRouteSearch,
-  stripFileSearchParams,
-} from "../fileRouteSearch";
+import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { parseFileRouteSearch, stripFileSearchParams } from "../fileRouteSearch";
+import { parsePortsRouteSearch, stripPortsSearchParams } from "../portsRouteSearch";
+import { PortsPanel } from "../components/PortsPanel";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
+import {
+  createDefaultSingleChatPanelState,
+  selectSingleChatPanelState,
+  useSingleChatPanelStore,
+} from "../singleChatPanelStore";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
 import { resolveThreadRouteRef, buildThreadRouteParams } from "../threadRoutes";
 import { RightPanelSheet } from "../components/RightPanelSheet";
 import { Sidebar, SidebarInset, SidebarProvider, SidebarRail } from "~/components/ui/sidebar";
 import { isElectron } from "~/env";
-import { XIcon } from "lucide-react";
+import { DiffIcon, FolderIcon, NetworkIcon, XIcon } from "lucide-react";
+import {
+  resolvePanelToOpen,
+  resolveRoutePanelState,
+  type ThreadRouteSearch,
+} from "./-chatThreadRoute.logic";
 
 const DiffPanel = lazy(() => import("../components/DiffPanel"));
 const RIGHT_PANEL_SIDEBAR_WIDTH_STORAGE_KEY = "chat_right_panel_sidebar_width";
 const RIGHT_PANEL_DEFAULT_WIDTH = "clamp(30rem,50vw,56rem)";
 const RIGHT_PANEL_SIDEBAR_MIN_WIDTH = 26 * 16;
 const COMPOSER_COMPACT_MIN_LEFT_CONTROLS_WIDTH_PX = 208;
-
-type RightPanelView = "diff" | "files";
+const DEFAULT_PANEL_STATE = createDefaultSingleChatPanelState();
 
 const DiffLoadingFallback = (props: { mode: DiffPanelMode }) => {
   return (
@@ -66,16 +72,22 @@ function RightPanelContent({
   activeView,
   onSwitchToDiff,
   onSwitchToFiles,
+  onSwitchToPorts,
   onClose,
   mountedViews,
   mode,
+  environmentId,
+  projectCwd,
 }: {
-  activeView: RightPanelView;
+  activeView: ChatRightPanel;
   onSwitchToDiff: () => void;
   onSwitchToFiles: () => void;
+  onSwitchToPorts: () => void;
   onClose: () => void;
-  mountedViews: ReadonlySet<RightPanelView>;
+  mountedViews: ReadonlySet<ChatRightPanel>;
   mode: DiffPanelMode;
+  environmentId: EnvironmentId;
+  projectCwd: string | null;
 }) {
   const shouldUseDragRegion = isElectron && mode !== "sheet";
 
@@ -92,26 +104,44 @@ function RightPanelContent({
           <button
             type="button"
             onClick={onSwitchToDiff}
+            aria-label="Show diff panel"
+            title="Diff"
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              "rounded-md p-1.5 transition-colors",
               activeView === "diff"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
             )}
           >
-            Diff
+            <DiffIcon className="size-3.5" />
           </button>
           <button
             type="button"
             onClick={onSwitchToFiles}
+            aria-label="Show files panel"
+            title="Files"
             className={cn(
-              "rounded-md px-2.5 py-1 text-xs font-medium transition-colors",
+              "rounded-md p-1.5 transition-colors",
               activeView === "files"
                 ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
             )}
           >
-            Files
+            <FolderIcon className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={onSwitchToPorts}
+            aria-label="Show ports panel"
+            title="Ports"
+            className={cn(
+              "rounded-md p-1.5 transition-colors",
+              activeView === "ports"
+                ? "bg-accent text-accent-foreground"
+                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+            )}
+          >
+            <NetworkIcon className="size-3.5" />
           </button>
         </div>
         <div className="flex-1 [-webkit-app-region:drag]" />
@@ -137,6 +167,11 @@ function RightPanelContent({
             <FilePanel />
           </div>
         )}
+        {mountedViews.has("ports") && (
+          <div className={cn("absolute inset-0", activeView !== "ports" && "hidden")}>
+            <PortsPanel environmentId={environmentId} cwd={projectCwd} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -146,12 +181,15 @@ function RightPanelContent({
 
 const RightPanelInlineSidebar = (props: {
   panelOpen: boolean;
-  activeView: RightPanelView;
-  mountedViews: ReadonlySet<RightPanelView>;
+  activeView: ChatRightPanel;
+  mountedViews: ReadonlySet<ChatRightPanel>;
   onClose: () => void;
   onOpenChange: (open: boolean) => void;
   onSwitchToDiff: () => void;
   onSwitchToFiles: () => void;
+  onSwitchToPorts: () => void;
+  environmentId: EnvironmentId;
+  projectCwd: string | null;
 }) => {
   const {
     panelOpen,
@@ -161,6 +199,9 @@ const RightPanelInlineSidebar = (props: {
     onOpenChange,
     onSwitchToDiff,
     onSwitchToFiles,
+    onSwitchToPorts,
+    environmentId,
+    projectCwd,
   } = props;
 
   const shouldAcceptInlineSidebarWidth = useCallback(
@@ -234,9 +275,12 @@ const RightPanelInlineSidebar = (props: {
             activeView={activeView}
             onSwitchToDiff={onSwitchToDiff}
             onSwitchToFiles={onSwitchToFiles}
+            onSwitchToPorts={onSwitchToPorts}
             onClose={onClose}
             mountedViews={mountedViews}
             mode="sidebar"
+            environmentId={environmentId}
+            projectCwd={projectCwd}
           />
         ) : null}
         <SidebarRail />
@@ -275,22 +319,50 @@ function ChatThreadRouteView() {
   const routeThreadExists = threadExists || draftThreadExists;
   const serverThreadStarted = threadHasStarted(serverThread);
   const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads;
+  const activeProjectId = serverThread?.projectId ?? draftThread?.projectId ?? null;
+  const activeProjectCwd = useStore((store) => {
+    if (!threadRef || !activeProjectId) {
+      return null;
+    }
+    return (
+      selectEnvironmentState(store, threadRef.environmentId).projectById[activeProjectId]?.cwd ??
+      null
+    );
+  });
 
   const diffOpen = search.diff === "1";
   const filesOpen = search.files === "1";
-  const panelOpen = diffOpen || filesOpen;
-  const activeView: RightPanelView = filesOpen ? "files" : "diff";
+  const portsOpen = search.ports === "1";
+  const panelOpen = diffOpen || filesOpen || portsOpen;
+  const activeView: ChatRightPanel = filesOpen ? "files" : portsOpen ? "ports" : "diff";
 
   const shouldUseDiffSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
-  const currentThreadKey = threadRef ? `${threadRef.environmentId}:${threadRef.threadId}` : null;
+  const currentThreadKey = threadRef
+    ? scopedThreadKey(scopeThreadRef(threadRef.environmentId, threadRef.threadId))
+    : null;
+  const panelState = useSingleChatPanelStore(
+    useMemo(
+      () =>
+        currentThreadKey ? selectSingleChatPanelState(currentThreadKey) : () => DEFAULT_PANEL_STATE,
+      [currentThreadKey],
+    ),
+  );
 
   // Track which panel views have ever been mounted (for lazy keep-alive)
-  const [mountedViews, setMountedViews] = useState<ReadonlySet<RightPanelView>>(() => {
-    const views = new Set<RightPanelView>();
+  const [mountedViews, setMountedViews] = useState<ReadonlySet<ChatRightPanel>>(() => {
+    const views = new Set<ChatRightPanel>();
     if (diffOpen) views.add("diff");
     if (filesOpen) views.add("files");
+    if (portsOpen) views.add("ports");
     return views;
   });
+
+  useEffect(() => {
+    if (!currentThreadKey) return;
+    useSingleChatPanelStore
+      .getState()
+      .setThreadPanelState(currentThreadKey, resolveRoutePanelState(search));
+  }, [currentThreadKey, search]);
 
   useEffect(() => {
     if (!panelOpen) return;
@@ -307,19 +379,21 @@ function ChatThreadRouteView() {
   useEffect(() => {
     if (lastThreadKeyRef.current !== currentThreadKey) {
       lastThreadKeyRef.current = currentThreadKey;
-      const views = new Set<RightPanelView>();
+      const views = new Set<ChatRightPanel>();
       if (diffOpen) views.add("diff");
       if (filesOpen) views.add("files");
+      if (portsOpen) views.add("ports");
       setMountedViews(views);
     }
-  });
+  }, [currentThreadKey, diffOpen, filesOpen, portsOpen]);
 
   const closePanel = useCallback(() => {
     if (!threadRef) return;
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
-      search: (previous) => stripFileSearchParams(stripDiffSearchParams(previous)),
+      search: (previous) =>
+        stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous))),
     });
   }, [navigate, threadRef]);
 
@@ -329,7 +403,7 @@ function ChatThreadRouteView() {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
-        const rest = stripFileSearchParams(stripDiffSearchParams(previous));
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
         return { ...rest, diff: "1" };
       },
     });
@@ -341,8 +415,20 @@ function ChatThreadRouteView() {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
-        const rest = stripFileSearchParams(stripDiffSearchParams(previous));
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
         return { ...rest, files: "1" };
+      },
+    });
+  }, [navigate, threadRef]);
+
+  const openPorts = useCallback(() => {
+    if (!threadRef) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
+      search: (previous) => {
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+        return { ...rest, ports: "1" };
       },
     });
   }, [navigate, threadRef]);
@@ -353,7 +439,7 @@ function ChatThreadRouteView() {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
-        const rest = stripFileSearchParams(previous);
+        const rest = stripPortsSearchParams(stripFileSearchParams(previous));
         return { ...rest, diff: "1" };
       },
     });
@@ -365,18 +451,42 @@ function ChatThreadRouteView() {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
+        const rest = stripPortsSearchParams(stripDiffSearchParams(previous));
         return { ...rest, files: "1" };
+      },
+    });
+  }, [navigate, threadRef]);
+
+  const switchToPorts = useCallback(() => {
+    if (!threadRef) return;
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(threadRef),
+      search: (previous) => {
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+        return { ...rest, ports: "1" };
       },
     });
   }, [navigate, threadRef]);
 
   const handlePanelOpenChange = useCallback(
     (open: boolean) => {
-      if (open) openDiff();
-      else closePanel();
+      if (!open) {
+        closePanel();
+        return;
+      }
+      const panelToOpen = resolvePanelToOpen(panelState);
+      if (panelToOpen === "files") {
+        openFiles();
+        return;
+      }
+      if (panelToOpen === "ports") {
+        openPorts();
+        return;
+      }
+      openDiff();
     },
-    [openDiff, closePanel],
+    [closePanel, openDiff, openFiles, openPorts, panelState],
   );
 
   useEffect(() => {
@@ -415,6 +525,9 @@ function ChatThreadRouteView() {
           onOpenChange={handlePanelOpenChange}
           onSwitchToDiff={switchToDiff}
           onSwitchToFiles={switchToFiles}
+          onSwitchToPorts={switchToPorts}
+          environmentId={threadRef.environmentId}
+          projectCwd={activeProjectCwd}
         />
       </>
     );
@@ -435,24 +548,23 @@ function ChatThreadRouteView() {
           activeView={activeView}
           onSwitchToDiff={switchToDiff}
           onSwitchToFiles={switchToFiles}
+          onSwitchToPorts={switchToPorts}
           onClose={closePanel}
           mountedViews={mountedViews}
           mode="sheet"
+          environmentId={threadRef.environmentId}
+          projectCwd={activeProjectCwd}
         />
       </RightPanelSheet>
     </>
   );
 }
 
-type ThreadRouteSearch = DiffRouteSearch & FileRouteSearch;
-
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
   validateSearch: (search): ThreadRouteSearch => ({
     ...parseDiffRouteSearch(search),
     ...parseFileRouteSearch(search),
+    ...parsePortsRouteSearch(search),
   }),
-  search: {
-    middlewares: [retainSearchParams<ThreadRouteSearch>(["diff", "files"])],
-  },
   component: ChatThreadRouteView,
 });
