@@ -1,4 +1,15 @@
-import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schedule, Schema, Stream } from "effect";
+import {
+  Cause,
+  Duration,
+  Effect,
+  Layer,
+  Option,
+  Queue,
+  Ref,
+  Schedule,
+  Schema,
+  Stream,
+} from "effect";
 import OS from "node:os";
 import {
   type AuthAccessStreamEvent,
@@ -15,6 +26,7 @@ import {
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
+  ProjectReadFileError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
@@ -806,6 +818,19 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsReadFile]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsReadFile,
+            workspaceFileSystem.readFile(input).pipe(
+              Effect.mapError((cause) => {
+                const message = Schema.is(WorkspacePathOutsideRootError)(cause)
+                  ? "Workspace file path must stay within the project root."
+                  : "Failed to read workspace file";
+                return new ProjectReadFileError({ message, cause });
+              }),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
         [WS_METHODS.shellOpenInEditor]: (input) =>
           observeRpcEffect(WS_METHODS.shellOpenInEditor, open.openInEditor(input), {
             "rpc.aggregate": "workspace",
@@ -1087,10 +1112,10 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
         [WS_METHODS.subscribeResourceStats]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeResourceStats,
-            Stream.repeatEffectWithSchedule(
+            Stream.fromEffectSchedule(
               Effect.sync(() => {
                 const cpus = OS.cpus();
-                const [load1m] = OS.loadavg();
+                const load1m = OS.loadavg()[0] ?? 0;
                 return {
                   version: 1 as const,
                   type: "snapshot" as const,

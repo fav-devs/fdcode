@@ -1,3 +1,6 @@
+import * as ChildProcess from "node:child_process";
+import * as NodeFs from "node:fs";
+import * as NodePath from "node:path";
 import { NetService } from "@t3tools/shared/Net";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
 import {
@@ -10,6 +13,7 @@ import {
 import {
   Config,
   Console,
+  Data,
   Duration,
   Effect,
   Exit,
@@ -193,6 +197,22 @@ interface CliAuthLocationFlags {
   readonly baseDir: Option.Option<string>;
   readonly devUrl?: Option.Option<URL>;
 }
+
+interface CliDaemonStatus {
+  readonly status: "running" | "stale" | "not-running";
+  readonly pid: number | null;
+  readonly origin: string | null;
+  readonly startedAt: string | null;
+  readonly logPath: string;
+}
+
+const DETACHED_DAEMON_STARTUP_GRACE_MS = 1_500;
+const DEFAULT_DAEMON_STOP_TIMEOUT_MS = 5_000;
+
+class DaemonCliError extends Data.TaggedError("DaemonCliError")<{
+  readonly message: string;
+  readonly cause?: unknown;
+}> {}
 
 const resolveOptionPrecedence = <Value>(
   ...values: ReadonlyArray<Option.Option<Value>>
@@ -389,6 +409,258 @@ const resolveCliAuthConfig = (
     },
     cliLogLevel,
   );
+
+const isProcessRunning = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (typeof error === "object" && error !== null && "code" in error) {
+      return (error as { readonly code?: unknown }).code === "EPERM";
+    }
+    return false;
+  }
+};
+
+const resolveDaemonStatus = Effect.fn("resolveDaemonStatus")(function* (
+  config: Pick<ServerConfigShape, "serverRuntimeStatePath" | "serverLogPath">,
+) {
+  const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath);
+  if (Option.isNone(runtimeState)) {
+    return {
+      status: "not-running",
+      pid: null,
+      origin: null,
+      startedAt: null,
+      logPath: config.serverLogPath,
+    } satisfies CliDaemonStatus;
+  }
+
+  if (!isProcessRunning(runtimeState.value.pid)) {
+    return {
+      status: "stale",
+      pid: runtimeState.value.pid,
+      origin: runtimeState.value.origin,
+      startedAt: runtimeState.value.startedAt,
+      logPath: config.serverLogPath,
+    } satisfies CliDaemonStatus;
+  }
+
+  return {
+    status: "running",
+    pid: runtimeState.value.pid,
+    origin: runtimeState.value.origin,
+    startedAt: runtimeState.value.startedAt,
+    logPath: config.serverLogPath,
+  } satisfies CliDaemonStatus;
+});
+
+const daemonStatusToOutput = (status: CliDaemonStatus, options: { readonly json: boolean }) => {
+  if (options.json) {
+    return JSON.stringify(status, null, 2);
+  }
+
+  switch (status.status) {
+    case "running":
+      return [
+        "Daemon status: running",
+        `PID: ${status.pid ?? "-"}`,
+        `Origin: ${status.origin ?? "-"}`,
+        `Started at: ${status.startedAt ?? "-"}`,
+        `Logs: ${status.logPath}`,
+      ].join("\n");
+    case "stale":
+      return [
+        "Daemon status: stale",
+        `PID: ${status.pid ?? "-"}`,
+        `Origin: ${status.origin ?? "-"}`,
+        `Started at: ${status.startedAt ?? "-"}`,
+        `Logs: ${status.logPath}`,
+        "The runtime state file exists, but the recorded process is not running.",
+      ].join("\n");
+    case "not-running":
+      return ["Daemon status: not running", `Logs: ${status.logPath}`].join("\n");
+  }
+};
+
+const lowerCaseLogLevel = (level: LogLevel.LogLevel): string => String(level).toLowerCase();
+
+const appendFlagValue = (args: string[], name: string, value: string | number) => {
+  args.push(`--${name}`, String(value));
+};
+
+const appendBooleanFlag = (args: string[], name: string, enabled: boolean) => {
+  args.push(enabled ? `--${name}` : `--no-${name}`);
+};
+
+const buildDetachedHostArgs = (
+  flags: CliServerFlags,
+  logLevel: Option.Option<LogLevel.LogLevel>,
+): string[] => {
+  const args = ["host"];
+
+  if (Option.isSome(logLevel)) {
+    appendFlagValue(args, "log-level", lowerCaseLogLevel(logLevel.value));
+  }
+  if (Option.isSome(flags.mode)) {
+    appendFlagValue(args, "mode", flags.mode.value);
+  }
+  if (Option.isSome(flags.port)) {
+    appendFlagValue(args, "port", flags.port.value);
+  }
+  if (Option.isSome(flags.host)) {
+    appendFlagValue(args, "host", flags.host.value);
+  }
+  if (Option.isSome(flags.baseDir)) {
+    appendFlagValue(args, "base-dir", flags.baseDir.value);
+  }
+  if (Option.isSome(flags.cwd)) {
+    args.push(flags.cwd.value);
+  }
+  if (Option.isSome(flags.devUrl)) {
+    appendFlagValue(args, "dev-url", flags.devUrl.value.toString());
+  }
+  if (Option.isSome(flags.autoBootstrapProjectFromCwd)) {
+    appendBooleanFlag(
+      args,
+      "auto-bootstrap-project-from-cwd",
+      flags.autoBootstrapProjectFromCwd.value,
+    );
+  }
+  if (Option.isSome(flags.logWebSocketEvents)) {
+    appendBooleanFlag(args, "log-websocket-events", flags.logWebSocketEvents.value);
+  }
+
+  return args;
+};
+
+const waitForPidExit = (pid: number, timeoutMs: number) =>
+  Effect.promise<boolean>(
+    () =>
+      new Promise((resolve) => {
+        const startedAt = Date.now();
+        const poll = () => {
+          if (!isProcessRunning(pid)) {
+            resolve(true);
+            return;
+          }
+          if (Date.now() - startedAt >= timeoutMs) {
+            resolve(false);
+            return;
+          }
+          setTimeout(poll, 100);
+        };
+        poll();
+      }),
+  );
+
+const startDetachedDaemon = Effect.fn("startDetachedDaemon")(function* (
+  flags: CliServerFlags,
+  logLevel: Option.Option<LogLevel.LogLevel>,
+) {
+  const config = yield* resolveServerConfig(flags, logLevel, {
+    startupPresentation: "headless",
+    forceAutoBootstrapProjectFromCwd: false,
+  });
+  const daemonStatus = yield* resolveDaemonStatus(config);
+  if (daemonStatus.status === "running") {
+    return {
+      action: "already-running" as const,
+      pid: daemonStatus.pid,
+      logPath: daemonStatus.logPath,
+      origin: daemonStatus.origin,
+    };
+  }
+
+  if (daemonStatus.status === "stale") {
+    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+  }
+
+  const cliEntry = process.argv[1];
+  if (typeof cliEntry !== "string" || cliEntry.trim().length === 0) {
+    throw new Error("Failed to resolve the current CLI entrypoint for daemon startup.");
+  }
+
+  const logFd = yield* Effect.sync(() => {
+    NodeFs.mkdirSync(NodePath.dirname(config.serverLogPath), { recursive: true });
+    return NodeFs.openSync(config.serverLogPath, "a");
+  });
+
+  const childArgs = [cliEntry, ...buildDetachedHostArgs(flags, logLevel)];
+  const child = yield* Effect.try({
+    try: () =>
+      ChildProcess.spawn(process.execPath, childArgs, {
+        detached: true,
+        stdio: ["ignore", logFd, logFd],
+        cwd: process.cwd(),
+        env: process.env,
+      }),
+    catch: (cause) =>
+      new DaemonCliError({
+        message: `Failed to spawn detached daemon process: ${String(cause)}`,
+        cause,
+      }),
+  }).pipe(
+    Effect.ensuring(
+      Effect.sync(() => {
+        try {
+          NodeFs.closeSync(logFd);
+        } catch {
+          // Ignore log fd close failures in the parent process.
+        }
+      }),
+    ),
+  );
+
+  const startup = yield* Effect.promise<{
+    readonly exitedEarly: boolean;
+    readonly code: number | null;
+    readonly signal: NodeJS.Signals | null;
+    readonly error?: Error;
+  }>(
+    () =>
+      new Promise((resolve) => {
+        let settled = false;
+        const finish = (value: {
+          readonly exitedEarly: boolean;
+          readonly code: number | null;
+          readonly signal: NodeJS.Signals | null;
+          readonly error?: Error;
+        }) => {
+          if (settled) return;
+          settled = true;
+          resolve(value);
+        };
+        const timer = setTimeout(() => {
+          finish({ exitedEarly: false, code: null, signal: null });
+        }, DETACHED_DAEMON_STARTUP_GRACE_MS);
+        child.once("error", (error) => {
+          clearTimeout(timer);
+          finish({ exitedEarly: true, code: null, signal: null, error });
+        });
+        child.once("exit", (code, signal) => {
+          clearTimeout(timer);
+          finish({ exitedEarly: true, code, signal });
+        });
+        child.unref();
+      }),
+  );
+
+  if (startup.exitedEarly) {
+    const reason = startup.error
+      ? startup.error.message
+      : `exit code ${startup.code ?? "unknown"}${startup.signal ? ` (${startup.signal})` : ""}`;
+    throw new Error(
+      `Daemon failed to start in background (${reason}). Check logs at ${config.serverLogPath}.`,
+    );
+  }
+
+  return {
+    action: "started" as const,
+    pid: child.pid ?? null,
+    logPath: config.serverLogPath,
+  };
+});
 
 const DurationShorthandPattern = /^(?<value>\d+)(?<unit>ms|s|m|h|d|w)$/i;
 
@@ -781,6 +1053,16 @@ const jsonFlag = Flag.boolean("json").pipe(
   Flag.withDefault(false),
 );
 
+const foregroundFlag = Flag.boolean("foreground").pipe(
+  Flag.withDescription("Run the daemon in the foreground instead of detaching."),
+  Flag.withDefault(false),
+);
+
+const forceFlag = Flag.boolean("force").pipe(
+  Flag.withDescription("Force-stop the daemon with SIGKILL if it ignores SIGTERM."),
+  Flag.withDefault(false),
+);
+
 const sessionRoleFlag = Flag.choice("role", ["owner", "client"]).pipe(
   Flag.withDescription("Role for the issued bearer session."),
   Flag.withDefault("owner"),
@@ -1126,8 +1408,169 @@ const serveCommand = Command.make("serve", { ...sharedServerCommandFlags }).pipe
   ),
 );
 
+const hostCommand = Command.make("host", { ...sharedServerCommandFlags }).pipe(
+  Command.withDescription(
+    "Run the T3 Code server as a standalone remote host for desktop clients, keeping logs in the terminal and printing pairing details.",
+  ),
+  Command.withHandler((flags) =>
+    runServerCommand(flags, {
+      startupPresentation: "headless",
+      forceAutoBootstrapProjectFromCwd: false,
+    }),
+  ),
+);
+
+const daemonStartCommand = Command.make("start", {
+  ...sharedServerCommandFlags,
+  foreground: foregroundFlag,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Start the T3 daemon in the background by default."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      if (flags.foreground) {
+        return yield* runServerCommand(flags, {
+          startupPresentation: "headless",
+          forceAutoBootstrapProjectFromCwd: false,
+        });
+      }
+
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const startup = yield* startDetachedDaemon(flags, logLevel);
+      const output = flags.json
+        ? JSON.stringify(startup, null, 2)
+        : startup.action === "already-running"
+          ? [
+              "Daemon already running.",
+              `PID: ${startup.pid ?? "-"}`,
+              `Origin: ${startup.origin ?? "-"}`,
+              `Logs: ${startup.logPath}`,
+            ].join("\n")
+          : [
+              `Daemon started in background (PID ${startup.pid ?? "unknown"}).`,
+              `Logs: ${startup.logPath}`,
+              `Tail logs with: tail -f ${startup.logPath}`,
+            ].join("\n");
+      yield* Console.log(output);
+    }),
+  ),
+);
+
+const daemonStatusCommand = Command.make("status", {
+  ...authLocationFlags,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Show daemon status for the selected base directory."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const config = yield* resolveCliAuthConfig(flags, logLevel);
+      const status = yield* resolveDaemonStatus(config);
+      if (status.status === "stale") {
+        yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+      }
+      yield* Console.log(daemonStatusToOutput(status, { json: flags.json }));
+    }),
+  ),
+);
+
+const daemonStopCommand = Command.make("stop", {
+  ...authLocationFlags,
+  force: forceFlag,
+  json: jsonFlag,
+}).pipe(
+  Command.withDescription("Stop the detached daemon for the selected base directory."),
+  Command.withHandler((flags) =>
+    Effect.gen(function* () {
+      const logLevel = yield* GlobalFlag.LogLevel;
+      const config = yield* resolveCliAuthConfig(flags, logLevel);
+      const status = yield* resolveDaemonStatus(config);
+
+      if (status.status !== "running" || status.pid === null) {
+        if (status.status === "stale") {
+          yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+        }
+        const output = flags.json
+          ? JSON.stringify(
+              {
+                action: "not-running",
+                pid: status.pid,
+                logPath: status.logPath,
+              },
+              null,
+              2,
+            )
+          : ["Daemon is not running.", `Logs: ${status.logPath}`].join("\n");
+        yield* Console.log(output);
+        return;
+      }
+
+      yield* Effect.try({
+        try: () => process.kill(status.pid as number, "SIGTERM"),
+        catch: (cause) =>
+          new DaemonCliError({
+            message: `Failed to signal daemon PID ${status.pid}: ${String(cause)}`,
+            cause,
+          }),
+      });
+
+      let stopped = yield* waitForPidExit(status.pid, DEFAULT_DAEMON_STOP_TIMEOUT_MS);
+      let forced = false;
+      if (!stopped && flags.force) {
+        forced = true;
+        yield* Effect.try({
+          try: () => process.kill(status.pid as number, "SIGKILL"),
+          catch: (cause) =>
+            new DaemonCliError({
+              message: `Failed to force-stop daemon PID ${status.pid}: ${String(cause)}`,
+              cause,
+            }),
+        });
+        stopped = yield* waitForPidExit(status.pid, 2_000);
+      }
+
+      if (!stopped) {
+        throw new Error(
+          `Timed out waiting for daemon PID ${status.pid} to stop after ${DEFAULT_DAEMON_STOP_TIMEOUT_MS}ms.`,
+        );
+      }
+
+      yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+      const output = flags.json
+        ? JSON.stringify(
+            {
+              action: "stopped",
+              pid: status.pid,
+              forced,
+              logPath: status.logPath,
+            },
+            null,
+            2,
+          )
+        : [
+            forced ? "Daemon force-stopped." : "Daemon stopped.",
+            `PID: ${status.pid}`,
+            `Logs: ${status.logPath}`,
+          ].join("\n");
+      yield* Console.log(output);
+    }),
+  ),
+);
+
+const daemonCommand = Command.make("daemon").pipe(
+  Command.withDescription("Manage the detached T3 daemon lifecycle."),
+  Command.withSubcommands([daemonStartCommand, daemonStatusCommand, daemonStopCommand]),
+);
+
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
   Command.withDescription("Run the T3 Code server."),
   Command.withHandler((flags) => runServerCommand(flags)),
-  Command.withSubcommands([startCommand, serveCommand, authCommand, projectCommand]),
+  Command.withSubcommands([
+    startCommand,
+    serveCommand,
+    hostCommand,
+    daemonCommand,
+    authCommand,
+    projectCommand,
+  ]),
 );
