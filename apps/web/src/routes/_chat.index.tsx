@@ -19,7 +19,7 @@ function ChatIndexRouteView() {
 
   useEffect(() => {
     if (!bootstrapComplete) return;
-    const homeDir = welcome?.homeDir;
+    const homeDir = welcome?.cwd;
     if (!homeDir || !primaryEnvironmentId) return;
     const environmentId = primaryEnvironmentId;
     void (async () => {
@@ -30,7 +30,7 @@ function ChatIndexRouteView() {
         scopeProjectRef(environmentId as never, projectId as never),
       );
     })();
-  }, [bootstrapComplete, welcome?.homeDir, primaryEnvironmentId]);
+  }, [bootstrapComplete, welcome?.cwd, primaryEnvironmentId]);
 
   return <NoActiveThreadState />;
 }
