@@ -34,7 +34,6 @@ function SettingsContentLayout() {
       SETTINGS_NAV_ITEMS.find((item) => item.to === location.pathname) ??
       SETTINGS_NAV_ITEMS[0] ?? {
         label: "Settings",
-        description: "Configure the app shell, providers, and thread management.",
         to: "/settings/general",
         icon: () => null,
       },
@@ -89,17 +88,11 @@ function SettingsContentLayout() {
         )}
 
         <div key={restoreSignal} className="min-h-0 flex flex-1 flex-col">
-          <div className="px-6 pb-1 pt-3 sm:px-8 sm:pt-4">
+          <div className="px-6 pb-1 pt-4 sm:px-8 sm:pt-5">
             <div className="mx-auto w-full max-w-2xl">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/52">
-                Settings
-              </div>
-              <h1 className="mt-2 text-2xl font-semibold tracking-tight text-foreground">
+              <h1 className="text-2xl font-semibold tracking-tight text-foreground">
                 {activeNavItem.label}
               </h1>
-              <p className="mt-1 max-w-xl text-sm leading-6 text-muted-foreground/74">
-                {activeNavItem.description}
-              </p>
             </div>
           </div>
           <Outlet />

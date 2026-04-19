@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { ArchiveIcon, ArrowLeftIcon, Link2Icon, Settings2Icon } from "lucide-react";
+import { ActivityIcon, ArchiveIcon, ArrowLeftIcon, Link2Icon, Settings2Icon } from "lucide-react";
 import { useNavigate } from "@tanstack/react-router";
 
 import {
@@ -14,6 +14,7 @@ import {
 
 export type SettingsSectionPath =
   | "/settings/general"
+  | "/settings/usage"
   | "/settings/connections"
   | "/settings/archived";
 
@@ -28,6 +29,12 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
     description: "Theme, behavior, and defaults.",
     to: "/settings/general",
     icon: Settings2Icon,
+  },
+  {
+    label: "Usage",
+    description: "Provider usage windows and remaining quota.",
+    to: "/settings/usage",
+    icon: ActivityIcon,
   },
   {
     label: "Connections",
@@ -50,14 +57,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="px-2 py-3">
-          <div className="px-2 pb-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/52">
-              Preferences
-            </div>
-            <div className="mt-1 text-[11px] leading-5 text-muted-foreground/68">
-              Configure the app shell, providers, and thread management.
-            </div>
-          </div>
           <SidebarMenu>
             {SETTINGS_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
@@ -83,15 +82,6 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     />
                     <div className="min-w-0 flex-1">
                       <div className="truncate">{item.label}</div>
-                      <div
-                        className={
-                          isActive
-                            ? "mt-0.5 text-[11px] font-normal leading-4 text-muted-foreground/78"
-                            : "mt-0.5 text-[11px] font-normal leading-4 text-muted-foreground/60"
-                        }
-                      >
-                        {item.description}
-                      </div>
                     </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
