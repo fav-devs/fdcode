@@ -39,6 +39,7 @@ import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
+import { parsePortsRouteSearch, stripPortsSearchParams } from "../portsRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -322,6 +323,7 @@ type ChatViewProps =
       environmentId: EnvironmentId;
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
+      onPortsPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "server";
       draftId?: never;
@@ -330,6 +332,7 @@ type ChatViewProps =
       environmentId: EnvironmentId;
       threadId: ThreadId;
       onDiffPanelOpen?: () => void;
+      onPortsPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
       routeKind: "draft";
       draftId: DraftId;
@@ -598,6 +601,7 @@ export default function ChatView(props: ChatViewProps) {
     threadId,
     routeKind,
     onDiffPanelOpen,
+    onPortsPanelOpen,
     reserveTitleBarControlInset = true,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
@@ -624,7 +628,10 @@ export default function ChatView(props: ChatViewProps) {
   const navigate = useNavigate();
   const rawSearch = useSearch({
     strict: false,
-    select: (params) => parseDiffRouteSearch(params),
+    select: (params) => ({
+      ...parseDiffRouteSearch(params),
+      ...parsePortsRouteSearch(params),
+    }),
   });
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
@@ -1484,6 +1491,7 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const portsOpen = rawSearch.ports === "1";
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
       return;
@@ -1504,6 +1512,34 @@ export default function ChatView(props: ChatViewProps) {
       },
     });
   }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+  const onTogglePorts = useCallback(() => {
+    if (!isServerThread || !activeProject) {
+      return;
+    }
+    if (!portsOpen) {
+      onPortsPanelOpen?.();
+    }
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: {
+        environmentId,
+        threadId,
+      },
+      replace: true,
+      search: (previous) => {
+        const rest = stripPortsSearchParams(previous);
+        return portsOpen ? { ...rest, ports: undefined } : { ...rest, ports: "1" };
+      },
+    });
+  }, [
+    activeProject,
+    environmentId,
+    isServerThread,
+    navigate,
+    onPortsPanelOpen,
+    portsOpen,
+    threadId,
+  ]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3204,6 +3240,7 @@ export default function ChatView(props: ChatViewProps) {
           terminalOpen={terminalUiState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
           diffToggleShortcutLabel={diffPanelShortcutLabel}
+          portsOpen={portsOpen}
           gitCwd={gitCwd}
           diffOpen={diffOpen}
           onRunProjectScript={runProjectScript}
@@ -3212,6 +3249,7 @@ export default function ChatView(props: ChatViewProps) {
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
           onToggleDiff={onToggleDiff}
+          onTogglePorts={onTogglePorts}
         />
       </header>
 

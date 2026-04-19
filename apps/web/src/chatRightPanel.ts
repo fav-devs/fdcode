@@ -1,1 +1,1 @@
-export type ChatRightPanel = "diff" | "files";
+export type ChatRightPanel = "diff" | "files" | "ports";
