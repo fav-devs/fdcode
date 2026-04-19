@@ -2,7 +2,7 @@ import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pie
 import type { ProjectEntry } from "@t3tools/contracts";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate, useSearch, useParams } from "@tanstack/react-router";
-import { FileIcon, FolderIcon, FolderOpenIcon, PencilIcon, SaveIcon, XIcon } from "lucide-react";
+import { CodeIcon, EyeIcon, PencilIcon, SaveIcon, XIcon } from "lucide-react";
 import { Suspense, use, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { getPrimaryEnvironmentConnection } from "../environments/runtime";
 import { useTheme } from "../hooks/useTheme";
@@ -13,6 +13,8 @@ import { createThreadSelectorByRef } from "../storeSelectors";
 import { buildThreadRouteParams, resolveThreadRouteRef } from "../threadRoutes";
 import { parseFileRouteSearch, stripFileSearchParams } from "../fileRouteSearch";
 import { toastManager } from "./ui/toast";
+import { VscodeEntryIcon } from "./chat/VscodeEntryIcon";
+import ChatMarkdown from "./ChatMarkdown";
 
 // ─── Language detection ────────────────────────────────────────────────────
 
@@ -73,6 +75,11 @@ function detectLanguage(path: string): string {
   if (lower === ".env" || lower.startsWith(".env.")) return "ini";
   const ext = lower.split(".").pop() ?? "";
   return EXT_TO_LANG[ext] ?? "text";
+}
+
+function isMarkdownPath(path: string): boolean {
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
+  return ext === "md" || ext === "mdx";
 }
 
 // ─── Syntax highlighting ───────────────────────────────────────────────────
@@ -152,15 +159,16 @@ function FileTreeRow({
   isSelected,
   isExpanded,
   onSelect,
+  theme,
 }: {
   entry: ProjectEntry;
   isSelected: boolean;
   isExpanded: boolean;
   onSelect: (entry: ProjectEntry) => void;
+  theme: "light" | "dark";
 }) {
   const depth = getPathDepth(entry.path);
   const name = entry.path.split("/").pop() ?? entry.path;
-  const isDir = entry.kind === "directory";
 
   return (
     <button
@@ -175,17 +183,24 @@ function FileTreeRow({
       onClick={() => onSelect(entry)}
       title={entry.path}
     >
-      {isDir ? (
-        isExpanded ? (
-          <FolderOpenIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        ) : (
-          <FolderIcon className="size-3.5 shrink-0 text-muted-foreground" />
-        )
-      ) : (
-        <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
-      )}
+      <VscodeEntryIcon
+        pathValue={isExpanded && entry.kind === "directory" ? `${entry.path}/` : entry.path}
+        kind={entry.kind}
+        theme={theme}
+        className="size-3.5 shrink-0"
+      />
       <span className="min-w-0 truncate">{name}</span>
     </button>
+  );
+}
+
+// ─── Markdown preview ─────────────────────────────────────────────────────
+
+function MarkdownPreview({ content, cwd }: { content: string; cwd: string }) {
+  return (
+    <div className="px-5 py-4">
+      <ChatMarkdown text={content} cwd={cwd} />
+    </div>
   );
 }
 
@@ -195,8 +210,11 @@ function FileContentView({ cwd, filePath }: { cwd: string; filePath: string }) {
   const { resolvedTheme } = useTheme();
   const themeName = resolveDiffThemeName(resolvedTheme);
   const language = detectLanguage(filePath);
+  const isMarkdown = isMarkdownPath(filePath);
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
+  // markdown starts in preview mode; other files start in code view
+  const [markdownMode, setMarkdownMode] = useState<"preview" | "source">("preview");
   const [editContent, setEditContent] = useState("");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -252,16 +270,57 @@ function FileContentView({ cwd, filePath }: { cwd: string; filePath: string }) {
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* File header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-2">
-        <FileIcon className="size-3.5 shrink-0 text-muted-foreground" />
+        <VscodeEntryIcon
+          pathValue={filePath}
+          kind="file"
+          theme={resolvedTheme === "dark" ? "dark" : "light"}
+          className="size-3.5 shrink-0"
+        />
         <span
           className="min-w-0 flex-1 truncate text-xs font-medium text-foreground/80"
           title={filePath}
         >
           {fileName}
         </span>
-        <span className="shrink-0 rounded bg-accent/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-          {language}
-        </span>
+
+        {/* Markdown preview/source toggle */}
+        {isMarkdown && !isEditing && (
+          <div className="flex shrink-0 items-center rounded border border-border/50 bg-accent/30">
+            <button
+              type="button"
+              className={cn(
+                "flex items-center gap-1 rounded-l px-2 py-0.5 text-[10px] transition-colors",
+                markdownMode === "preview"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setMarkdownMode("preview")}
+            >
+              <EyeIcon className="size-2.5" />
+              Preview
+            </button>
+            <button
+              type="button"
+              className={cn(
+                "flex items-center gap-1 rounded-r px-2 py-0.5 text-[10px] transition-colors",
+                markdownMode === "source"
+                  ? "bg-accent text-accent-foreground"
+                  : "text-muted-foreground hover:text-foreground",
+              )}
+              onClick={() => setMarkdownMode("source")}
+            >
+              <CodeIcon className="size-2.5" />
+              Source
+            </button>
+          </div>
+        )}
+
+        {!isMarkdown && (
+          <span className="shrink-0 rounded bg-accent/60 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+            {language}
+          </span>
+        )}
+
         {!isEditing ? (
           <button
             type="button"
@@ -319,6 +378,8 @@ function FileContentView({ cwd, filePath }: { cwd: string; filePath: string }) {
             autoCapitalize="off"
             autoCorrect="off"
           />
+        ) : isMarkdown && markdownMode === "preview" ? (
+          <MarkdownPreview content={data?.contents ?? ""} cwd={cwd} />
         ) : (
           <Suspense fallback={<HighlightedCodeFallback code={data?.contents ?? ""} />}>
             <SuspenseHighlightedCode
@@ -340,6 +401,8 @@ export default function FilePanel() {
   const [searchQuery, setSearchQuery] = useState("");
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set());
   const autoExpandedCwdRef = useRef<string | null>(null);
+  const { resolvedTheme } = useTheme();
+  const iconTheme: "light" | "dark" = resolvedTheme === "dark" ? "dark" : "light";
 
   const routeThreadRef = useParams({
     strict: false,
@@ -465,6 +528,7 @@ export default function FilePanel() {
                 isSelected={entry.path === selectedPath}
                 isExpanded={expandedDirs.has(entry.path)}
                 onSelect={selectEntry}
+                theme={iconTheme}
               />
             ))
           )}
