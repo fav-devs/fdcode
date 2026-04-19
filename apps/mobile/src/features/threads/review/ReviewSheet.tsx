@@ -1,4 +1,4 @@
-import { ThreadId, type OrchestrationCheckpointSummary } from "@t3tools/contracts";
+import { EnvironmentId, ThreadId, type OrchestrationCheckpointSummary } from "@t3tools/contracts";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import Stack from "expo-router/stack";
 import { SymbolView } from "expo-symbols";
@@ -645,7 +645,7 @@ export function ReviewSheet() {
       return;
     }
 
-    const client = getEnvironmentClient(environmentId);
+    const client = getEnvironmentClient(environmentId as EnvironmentId);
     if (!client) {
       setError("Remote connection is not ready.");
       return;
@@ -680,7 +680,7 @@ export function ReviewSheet() {
         return;
       }
 
-      const client = getEnvironmentClient(environmentId);
+      const client = getEnvironmentClient(environmentId as EnvironmentId);
       if (!client) {
         setError("Remote connection is not ready.");
         return;

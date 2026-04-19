@@ -209,7 +209,7 @@ export async function connectSavedEnvironment(
       },
       onClose: (details) => {
         const reason =
-          details.reason.trim().length > 0
+          (details.reason ?? "").trim().length > 0
             ? details.reason
             : details.code === 1000
               ? null

@@ -90,7 +90,7 @@ export function buildTerminalMenuSessions(input: {
 
     sessionsById.set(session.target.terminalId, {
       terminalId: session.target.terminalId,
-      cwd: session.state.snapshot?.cwd ?? input.workspaceRoot,
+      cwd: session.state.summary?.cwd ?? input.workspaceRoot,
       status: session.state.status,
       updatedAt: session.state.updatedAt,
     });

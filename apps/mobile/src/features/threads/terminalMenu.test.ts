@@ -13,12 +13,12 @@ function makeKnownSession(input: {
 }): KnownTerminalSession {
   return {
     target: {
-      environmentId: "env-1",
-      threadId: "thread-1",
+      environmentId: "env-1" as import("@t3tools/contracts").EnvironmentId,
+      threadId: "thread-1" as import("@t3tools/contracts").ThreadId,
       terminalId: input.terminalId,
     },
     state: {
-      snapshot: input.cwd
+      summary: input.cwd
         ? {
             threadId: "thread-1",
             terminalId: input.terminalId,
@@ -26,7 +26,7 @@ function makeKnownSession(input: {
             worktreePath: input.cwd,
             status: input.status === "closed" ? "error" : input.status,
             pid: input.status === "running" ? 123 : null,
-            history: "",
+            hasRunningSubprocess: false,
             exitCode: null,
             exitSignal: null,
             updatedAt: input.updatedAt ?? "2026-04-15T20:00:00.000Z",

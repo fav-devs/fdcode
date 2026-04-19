@@ -1,4 +1,4 @@
-import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, EnvironmentId } from "@t3tools/contracts";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, ScrollView, Text as RNText, View } from "react-native";
@@ -195,7 +195,7 @@ export function ThreadTerminalRouteScreen() {
     [selectedThread, terminalId],
   );
   const isRunning = terminal.status === "running" || terminal.status === "starting";
-  const cwd = terminal.snapshot?.cwd ?? selectedThreadProject?.workspaceRoot ?? null;
+  const cwd = terminal.summary?.cwd ?? selectedThreadProject?.workspaceRoot ?? null;
   const hostPlatform = useMemo(
     () => inferHostPlatform(selectedEnvironmentConnection?.environmentLabel ?? null),
     [selectedEnvironmentConnection?.environmentLabel],
@@ -302,8 +302,8 @@ export function ThreadTerminalRouteScreen() {
     }
 
     const launchLocation = resolveTerminalOpenLocation({
-      terminalSnapshot: terminal.snapshot,
-      activeSessionSnapshot: activeKnownSession?.state.snapshot ?? null,
+      terminalSnapshot: terminal.summary,
+      activeSessionSnapshot: activeKnownSession?.state.summary ?? null,
       workspaceRoot: selectedThreadProject.workspaceRoot,
       threadShellWorktreePath: selectedThread.worktreePath ?? null,
       threadDetailWorktreePath: selectedThreadDetail?.worktreePath ?? null,
@@ -318,15 +318,15 @@ export function ThreadTerminalRouteScreen() {
       rows: lastGridSize.rows,
     });
 
-    terminalSessionManager.syncSnapshot({ environmentId: selectedThread.environmentId }, snapshot);
+    void snapshot;
   }, [
     lastGridSize.cols,
     lastGridSize.rows,
-    activeKnownSession?.state.snapshot,
+    activeKnownSession?.state.summary,
     selectedThreadDetail?.worktreePath,
     selectedThread,
     selectedThreadProject?.workspaceRoot,
-    terminal.snapshot,
+    terminal.summary,
     terminalId,
   ]);
 

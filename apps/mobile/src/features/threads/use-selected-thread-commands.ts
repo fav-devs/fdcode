@@ -3,6 +3,7 @@ import { useCallback, useState } from "react";
 import {
   ApprovalRequestId,
   CommandId,
+  EnvironmentId,
   type ModelSelection,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
@@ -39,7 +40,7 @@ export function useSelectedThreadCommands(input: {
   const onRefresh = useCallback(async () => {
     const targets = selectedThread
       ? [selectedThread.environmentId]
-      : Object.keys(savedConnectionsById);
+      : (Object.keys(savedConnectionsById) as EnvironmentId[]);
 
     await Promise.all(
       targets.map(async (environmentId) => {

@@ -1,4 +1,4 @@
-import { DEFAULT_TERMINAL_ID } from "@t3tools/contracts";
+import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { SymbolView } from "expo-symbols";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Pressable, View } from "react-native";
@@ -10,8 +10,8 @@ import { TerminalSurface } from "../../native/terminal/NativeTerminalSurface";
 import { hasNativeTerminalSurface } from "../../native/terminal/nativeTerminalModule";
 
 interface ThreadTerminalPanelProps {
-  readonly environmentId: string;
-  readonly threadId: string;
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
   readonly cwd: string;
   readonly worktreePath: string | null;
   readonly visible: boolean;
