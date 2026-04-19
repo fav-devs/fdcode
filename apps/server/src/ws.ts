@@ -1,4 +1,5 @@
-import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schema, Stream } from "effect";
+import { Cause, Duration, Effect, Layer, Option, Queue, Ref, Schedule, Schema, Stream } from "effect";
+import OS from "node:os";
 import {
   type AuthAccessStreamEvent,
   AuthSessionId,
@@ -1082,6 +1083,28 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
               );
             }),
             { "rpc.aggregate": "auth" },
+          ),
+        [WS_METHODS.subscribeResourceStats]: (_input) =>
+          observeRpcStream(
+            WS_METHODS.subscribeResourceStats,
+            Stream.repeatEffectWithSchedule(
+              Effect.sync(() => {
+                const cpus = OS.cpus();
+                const [load1m] = OS.loadavg();
+                return {
+                  version: 1 as const,
+                  type: "snapshot" as const,
+                  payload: {
+                    cpuLoad1m: load1m,
+                    cpuCount: cpus.length,
+                    memoryUsedBytes: OS.totalmem() - OS.freemem(),
+                    memoryTotalBytes: OS.totalmem(),
+                  },
+                };
+              }),
+              Schedule.fixed(Duration.millis(2000)),
+            ),
+            { "rpc.aggregate": "server" },
           ),
       });
     }),

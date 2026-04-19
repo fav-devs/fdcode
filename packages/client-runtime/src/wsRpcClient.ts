@@ -112,6 +112,7 @@ export interface WsRpcClient {
     readonly subscribeConfig: RpcStreamMethod<typeof WS_METHODS.subscribeServerConfig>;
     readonly subscribeLifecycle: RpcStreamMethod<typeof WS_METHODS.subscribeServerLifecycle>;
     readonly subscribeAuthAccess: RpcStreamMethod<typeof WS_METHODS.subscribeAuthAccess>;
+    readonly subscribeResourceStats: RpcStreamMethod<typeof WS_METHODS.subscribeResourceStats>;
   };
   readonly orchestration: {
     readonly dispatchCommand: RpcUnaryMethod<typeof ORCHESTRATION_WS_METHODS.dispatchCommand>;
@@ -245,6 +246,12 @@ export function createWsRpcClient(
       subscribeAuthAccess: (listener, options) =>
         transport.subscribe(
           (client) => client[WS_METHODS.subscribeAuthAccess]({}),
+          listener,
+          options,
+        ),
+      subscribeResourceStats: (listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.subscribeResourceStats]({}),
           listener,
           options,
         ),
