@@ -15,25 +15,25 @@ const VARIANT_CONFIG: Record<
   }
 > = {
   development: {
-    appName: "fdcode Dev",
-    scheme: "fdcode-dev",
+    appName: "T3 Code Dev",
+    scheme: "t3code-dev",
     iosIcon: "./assets/icon-composer-dev.icon",
-    iosBundleIdentifier: "com.favdevs.fdcode.dev",
-    androidPackage: "com.favdevs.fdcode.dev",
+    iosBundleIdentifier: "com.t3tools.t3code.dev",
+    androidPackage: "com.t3tools.t3code.dev",
   },
   preview: {
-    appName: "fdcode Preview",
-    scheme: "fdcode-preview",
+    appName: "T3 Code Preview",
+    scheme: "t3code-preview",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.favdevs.fdcode.preview",
-    androidPackage: "com.favdevs.fdcode.preview",
+    iosBundleIdentifier: "com.t3tools.t3code.preview",
+    androidPackage: "com.t3tools.t3code.preview",
   },
   production: {
-    appName: "fdcode",
-    scheme: "fdcode",
+    appName: "T3 Code",
+    scheme: "t3code",
     iosIcon: "./assets/icon-composer-prod.icon",
-    iosBundleIdentifier: "com.favdevs.fdcode",
-    androidPackage: "com.favdevs.fdcode",
+    iosBundleIdentifier: "com.t3tools.t3code",
+    androidPackage: "com.t3tools.t3code",
   },
 };
 
@@ -52,9 +52,8 @@ const variant = VARIANT_CONFIG[APP_VARIANT];
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "fdcode",
+  slug: "t3-code",
   scheme: variant.scheme,
-  slug: "fdcode",
   version: "0.1.0",
   runtimeVersion: {
     policy: "appVersion",
@@ -64,7 +63,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   updates: {
     enabled: true,
-    url: "https://u.expo.dev/d579208b-1405-4c71-b868-315979b80026",
+    url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
   },
@@ -102,7 +101,7 @@ const config: ExpoConfig = {
     [
       "expo-camera",
       {
-        cameraPermission: "Allow fdcode to access your camera so you can scan pairing QR codes.",
+        cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
         barcodeScannerEnabled: true,
       },
     ],
@@ -134,10 +133,10 @@ const config: ExpoConfig = {
   extra: {
     appVariant: APP_VARIANT,
     eas: {
-      projectId: "d579208b-1405-4c71-b868-315979b80026",
+      projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     },
   },
-  owner: "babalolafavour",
+  owner: "pingdotgg",
 };
 
 export default config;

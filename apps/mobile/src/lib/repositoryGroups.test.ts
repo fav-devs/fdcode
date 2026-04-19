@@ -51,29 +51,29 @@ function makeThread(
 describe("groupProjectsByRepository", () => {
   it("groups projects across environments by repository identity", () => {
     const repoIdentity = {
-      canonicalKey: "github.com/fav-devs/fdcode",
+      canonicalKey: "github.com/t3tools/t3code",
       locator: {
         source: "git-remote" as const,
         remoteName: "origin",
-        remoteUrl: "git@github.com:fav-devs/fdcode.git",
+        remoteUrl: "git@github.com:t3tools/t3code.git",
       },
       provider: "github",
-      owner: "fav-devs",
-      name: "fdcode",
-      displayName: "fdcode",
+      owner: "t3tools",
+      name: "t3code",
+      displayName: "T3 Code",
     };
 
     const projects = [
       makeProject({
         environmentId: EnvironmentId.make("env-local"),
         id: ProjectId.make("project-local"),
-        title: "fdcode",
+        title: "T3 Code",
         repositoryIdentity: repoIdentity,
       }),
       makeProject({
         environmentId: EnvironmentId.make("env-staging"),
         id: ProjectId.make("project-staging"),
-        title: "fdcode",
+        title: "T3 Code",
         repositoryIdentity: repoIdentity,
       }),
     ];
@@ -101,9 +101,9 @@ describe("groupProjectsByRepository", () => {
 
     expect(groups).toHaveLength(1);
     expect(groups[0]).toMatchObject({
-      key: "github.com/fav-devs/fdcode",
-      title: "fdcode",
-      subtitle: "fav-devs/fdcode",
+      key: "github.com/t3tools/t3code",
+      title: "T3 Code",
+      subtitle: "t3tools/t3code",
       projectCount: 2,
       threadCount: 2,
     });

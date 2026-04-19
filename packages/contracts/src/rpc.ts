@@ -2,9 +2,13 @@ import { Schema } from "effect";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
 
-import { OpenError, OpenInEditorInput } from "./editor";
-import { AuthAccessStreamEvent } from "./auth";
-import { FilesystemBrowseInput, FilesystemBrowseResult, FilesystemBrowseError } from "./filesystem";
+import { OpenError, OpenInEditorInput } from "./editor.ts";
+import { AuthAccessStreamEvent } from "./auth.ts";
+import {
+  FilesystemBrowseInput,
+  FilesystemBrowseResult,
+  FilesystemBrowseError,
+} from "./filesystem.ts";
 import {
   GitActionProgressEvent,
   GitCheckoutInput,
@@ -31,8 +35,8 @@ import {
   GitStatusInput,
   GitStatusResult,
   GitStatusStreamEvent,
-} from "./git";
-import { KeybindingsConfigError } from "./keybindings";
+} from "./git.ts";
+import { KeybindingsConfigError } from "./keybindings.ts";
 import {
   ClientOrchestrationCommand,
   ORCHESTRATION_WS_METHODS,
@@ -45,7 +49,7 @@ import {
   OrchestrationReplayEventsError,
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
-} from "./orchestration";
+} from "./orchestration.ts";
 import {
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
@@ -53,18 +57,21 @@ import {
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
-} from "./project";
+} from "./project.ts";
 import {
+  TerminalAttachInput,
+  TerminalAttachStreamEvent,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
   TerminalEvent,
+  TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
-} from "./terminal";
+} from "./terminal.ts";
 import {
   ServerConfigStreamEvent,
   ServerConfig,
@@ -72,8 +79,8 @@ import {
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
-} from "./server";
-import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings";
+} from "./server.ts";
+import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -105,6 +112,7 @@ export const WS_METHODS = {
 
   // Terminal methods
   terminalOpen: "terminal.open",
+  terminalAttach: "terminal.attach",
   terminalWrite: "terminal.write",
   terminalResize: "terminal.resize",
   terminalClear: "terminal.clear",
@@ -121,6 +129,7 @@ export const WS_METHODS = {
   // Streaming subscriptions
   subscribeGitStatus: "subscribeGitStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
+  subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
@@ -262,6 +271,13 @@ export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   error: TerminalError,
 });
 
+export const WsTerminalAttachRpc = Rpc.make(WS_METHODS.terminalAttach, {
+  payload: TerminalAttachInput,
+  success: TerminalAttachStreamEvent,
+  error: TerminalError,
+  stream: true,
+});
+
 export const WsTerminalWriteRpc = Rpc.make(WS_METHODS.terminalWrite, {
   payload: TerminalWriteInput,
   error: TerminalError,
@@ -341,6 +357,12 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
+export const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMetadata, {
+  payload: Schema.Struct({}),
+  success: TerminalMetadataStreamEvent,
+  stream: true,
+});
+
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
@@ -384,12 +406,14 @@ export const WsRpcGroup = RpcGroup.make(
   WsGitInitRpc,
   WsGitGetReviewDiffsRpc,
   WsTerminalOpenRpc,
+  WsTerminalAttachRpc,
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
   WsSubscribeTerminalEventsRpc,
+  WsSubscribeTerminalMetadataRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,

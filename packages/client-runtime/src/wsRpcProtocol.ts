@@ -1,24 +1,50 @@
 import { WsRpcGroup } from "@t3tools/contracts";
+import {
+  DEFAULT_RECONNECT_BACKOFF,
+  getReconnectDelayMs,
+  type WsProtocolLifecycleHandlers,
+} from "@t3tools/client-runtime";
 import { Duration, Effect, Layer, Schedule } from "effect";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 import * as Socket from "effect/unstable/socket/Socket";
 
 import {
+<<<<<<<< HEAD:apps/web/src/rpc/protocol.ts
+  acknowledgeRpcRequest,
+  clearAllTrackedRpcRequests,
+  trackRpcRequestSent,
+} from "./requestLatencyState";
+import {
+  recordWsConnectionAttempt,
+  recordWsConnectionClosed,
+  recordWsConnectionErrored,
+  recordWsConnectionOpened,
+} from "./wsConnectionState";
+========
   DEFAULT_RECONNECT_BACKOFF,
   getReconnectDelayMs,
   type ReconnectBackoffConfig,
-} from "./reconnectBackoff";
+} from "./reconnectBackoff.ts";
+>>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcProtocol.ts
 
-export interface WsProtocolLifecycleHandlers {
-  readonly onAttempt?: (socketUrl: string) => void;
-  readonly onOpen?: () => void;
-  readonly onError?: (message: string) => void;
-  readonly onClose?: (details: { readonly code: number; readonly reason: string }) => void;
+export type { WsProtocolLifecycleHandlers };
+
+export interface WsRpcProtocolRequestTelemetry {
+  readonly onRequestSent?: (requestId: string, tag: string) => void;
+  readonly onRequestAcknowledged?: (requestId: string) => void;
+  readonly onClearTrackedRequests?: () => void;
 }
 
 export interface WsRpcProtocolOptions {
   /** Backoff configuration for reconnect retries. */
   readonly backoff?: ReconnectBackoffConfig;
+  /**
+   * Invoked before user {@link WsProtocolLifecycleHandlers} for each socket lifecycle event.
+   * Use for additive telemetry (connection state, clearing request trackers on disconnect).
+   */
+  readonly telemetryLifecycle?: WsProtocolLifecycleHandlers;
+  /** Optional hooks around outbound requests and inbound RPC responses (latency tracking, etc.). */
+  readonly requestTelemetry?: WsRpcProtocolRequestTelemetry;
 }
 
 export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
@@ -54,16 +80,49 @@ function defaultLifecycleHandlers(): Required<WsProtocolLifecycleHandlers> {
   };
 }
 
+function resolveLifecycleHandlers(
+  handlers: WsProtocolLifecycleHandlers | undefined,
+  telemetryLifecycle: WsProtocolLifecycleHandlers | undefined,
+): Required<WsProtocolLifecycleHandlers> {
+  if (telemetryLifecycle === undefined) {
+    return {
+      ...defaultLifecycleHandlers(),
+      ...handlers,
+    };
+  }
+
+  return {
+    onAttempt: (socketUrl) => {
+      telemetryLifecycle.onAttempt?.(socketUrl);
+      handlers?.onAttempt?.(socketUrl);
+    },
+    onOpen: () => {
+      telemetryLifecycle.onOpen?.();
+      handlers?.onOpen?.();
+    },
+    onError: (message) => {
+      telemetryLifecycle.onError?.(message);
+      handlers?.onError?.(message);
+    },
+    onClose: (details) => {
+      telemetryLifecycle.onClose?.(details);
+      handlers?.onClose?.(details);
+    },
+  };
+}
+
 export function createWsRpcProtocolLayer(
   url: WsRpcProtocolSocketUrlProvider,
   handlers?: WsProtocolLifecycleHandlers,
   options?: WsRpcProtocolOptions,
 ) {
-  const lifecycle = {
-    ...defaultLifecycleHandlers(),
-    ...handlers,
-  };
+  const lifecycle = resolveLifecycleHandlers(handlers, options?.telemetryLifecycle);
   const backoff = options?.backoff ?? DEFAULT_RECONNECT_BACKOFF;
+  const requestTelemetry = options?.requestTelemetry;
+  const instrumentRequests =
+    requestTelemetry?.onRequestSent !== undefined ||
+    requestTelemetry?.onRequestAcknowledged !== undefined ||
+    requestTelemetry?.onClearTrackedRequests !== undefined;
 
   const resolvedUrl =
     typeof url === "function"
@@ -115,18 +174,49 @@ export function createWsRpcProtocolLayer(
   const socketLayer = Socket.layerWebSocket(resolvedUrl).pipe(
     Layer.provide(trackingWebSocketConstructorLayer),
   );
+<<<<<<<< HEAD:apps/web/src/rpc/protocol.ts
+  const retryPolicy = Schedule.addDelay(
+    Schedule.recurs(DEFAULT_RECONNECT_BACKOFF.maxRetries!),
+    (retryCount) => Effect.succeed(Duration.millis(getReconnectDelayMs(retryCount) ?? 0)),
+========
 
   const baseSchedule =
     backoff.maxRetries === null ? Schedule.forever : Schedule.recurs(backoff.maxRetries);
   const retryPolicy = Schedule.addDelay(baseSchedule, (retryCount) =>
     Effect.succeed(Duration.millis(getReconnectDelayMs(retryCount, backoff) ?? 0)),
+>>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcProtocol.ts
   );
   const protocolLayer = Layer.effect(
     RpcClient.Protocol,
-    RpcClient.makeProtocolSocket({
-      retryPolicy,
-      retryTransientErrors: true,
-    }),
+    instrumentRequests
+      ? Effect.map(
+          RpcClient.makeProtocolSocket({
+            retryPolicy,
+            retryTransientErrors: true,
+          }),
+          (protocol) => ({
+            ...protocol,
+            run: (clientId, writeResponse) =>
+              protocol.run(clientId, (response) => {
+                if (response._tag === "Chunk" || response._tag === "Exit") {
+                  requestTelemetry?.onRequestAcknowledged?.(response.requestId);
+                } else if (response._tag === "ClientProtocolError" || response._tag === "Defect") {
+                  requestTelemetry?.onClearTrackedRequests?.();
+                }
+                return writeResponse(response);
+              }),
+            send: (clientId, request, transferables) => {
+              if (request._tag === "Request") {
+                requestTelemetry?.onRequestSent?.(request.id, request.tag);
+              }
+              return protocol.send(clientId, request, transferables);
+            },
+          }),
+        )
+      : RpcClient.makeProtocolSocket({
+          retryPolicy,
+          retryTransientErrors: true,
+        }),
   );
 
   return protocolLayer.pipe(Layer.provide(Layer.mergeAll(socketLayer, RpcSerialization.layerJson)));

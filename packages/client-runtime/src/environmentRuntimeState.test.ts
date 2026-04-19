@@ -1,7 +1,8 @@
 import { AtomRegistry } from "effect/unstable/reactivity";
+import { EnvironmentId } from "@t3tools/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { createEnvironmentRuntimeManager } from "./environmentRuntimeState";
+import { createEnvironmentRuntimeManager } from "./environmentRuntimeState.ts";
 
 let atomRegistry = AtomRegistry.make();
 
@@ -10,7 +11,7 @@ function resetAtomRegistry() {
   atomRegistry = AtomRegistry.make();
 }
 
-const TARGET = { environmentId: "env-local" } as const;
+const TARGET = { environmentId: EnvironmentId.make("env-local") } as const;
 
 describe("createEnvironmentRuntimeManager", () => {
   afterEach(() => {

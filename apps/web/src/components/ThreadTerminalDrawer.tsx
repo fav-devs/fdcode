@@ -1,8 +1,9 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { Plus, SquareSplitHorizontal, TerminalSquare, Trash2, XIcon } from "lucide-react";
 import {
+  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
-  type TerminalEvent,
+  type TerminalAttachStreamEvent,
   type TerminalSessionSnapshot,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -29,7 +30,12 @@ import {
   wrappedTerminalLinkRangeIntersectsBufferLine,
 } from "../terminal-links";
 import {
+  isDiffToggleShortcut,
   isTerminalClearShortcut,
+  isTerminalCloseShortcut,
+  isTerminalNewShortcut,
+  isTerminalSplitShortcut,
+  isTerminalToggleShortcut,
   terminalDeleteShortcutData,
   terminalNavigationShortcutData,
 } from "../keybindings";
@@ -41,7 +47,7 @@ import {
 } from "../types";
 import { readEnvironmentApi } from "~/environmentApi";
 import { readLocalApi } from "~/localApi";
-import { selectTerminalEventEntries, useTerminalStateStore } from "../terminalStateStore";
+import { attachTerminalSession } from "../terminalSessionState";
 
 const MIN_DRAWER_HEIGHT = 180;
 const MAX_DRAWER_HEIGHT_RATIO = 0.75;
@@ -67,20 +73,6 @@ function writeTerminalSnapshot(terminal: Terminal, snapshot: TerminalSessionSnap
   if (snapshot.history.length > 0) {
     terminal.write(snapshot.history);
   }
-}
-
-export function selectTerminalEventEntriesAfterSnapshot(
-  entries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-  snapshotUpdatedAt: string,
-): ReadonlyArray<{ id: number; event: TerminalEvent }> {
-  return entries.filter((entry) => entry.event.createdAt > snapshotUpdatedAt);
-}
-
-export function selectPendingTerminalEventEntries(
-  entries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-  lastAppliedTerminalEventId: number,
-): ReadonlyArray<{ id: number; event: TerminalEvent }> {
-  return entries.filter((entry) => entry.id > lastAppliedTerminalEventId);
 }
 
 function normalizeComputedColor(value: string | null | undefined, fallback: string): string {
@@ -255,6 +247,7 @@ interface TerminalViewportProps {
   autoFocus: boolean;
   resizeEpoch: number;
   drawerHeight: number;
+  keybindings: ResolvedKeybindingsConfig;
 }
 
 export function TerminalViewport({
@@ -271,6 +264,7 @@ export function TerminalViewport({
   autoFocus,
   resizeEpoch,
   drawerHeight,
+  keybindings,
 }: TerminalViewportProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -282,8 +276,7 @@ export function TerminalViewport({
   const selectionActionRequestIdRef = useRef(0);
   const selectionActionOpenRef = useRef(false);
   const selectionActionTimerRef = useRef<number | null>(null);
-  const lastAppliedTerminalEventIdRef = useRef(0);
-  const terminalHydratedRef = useRef(false);
+  const keybindingsRef = useRef(keybindings);
   const handleSessionExited = useEffectEvent(() => {
     onSessionExited();
   });
@@ -291,6 +284,10 @@ export function TerminalViewport({
     onAddTerminalContext(selection);
   });
   const readTerminalLabel = useEffectEvent(() => terminalLabel);
+
+  useEffect(() => {
+    keybindingsRef.current = keybindings;
+  }, [keybindings]);
 
   useEffect(() => {
     const mount = containerRef.current;
@@ -403,6 +400,18 @@ export function TerminalViewport({
     };
 
     terminal.attachCustomKeyEventHandler((event) => {
+      const currentKeybindings = keybindingsRef.current;
+      const options = { context: { terminalFocus: true, terminalOpen: true } };
+      if (
+        isTerminalToggleShortcut(event, currentKeybindings, options) ||
+        isTerminalSplitShortcut(event, currentKeybindings, options) ||
+        isTerminalNewShortcut(event, currentKeybindings, options) ||
+        isTerminalCloseShortcut(event, currentKeybindings, options) ||
+        isDiffToggleShortcut(event, currentKeybindings, options)
+      ) {
+        return false;
+      }
+
       const navigationData = terminalNavigationShortcutData(event);
       if (navigationData !== null) {
         event.preventDefault();
@@ -542,7 +551,7 @@ export function TerminalViewport({
       attributeFilter: ["class", "style"],
     });
 
-    const applyTerminalEvent = (event: TerminalEvent) => {
+    const applyAttachEvent = (event: TerminalAttachStreamEvent) => {
       const activeTerminal = terminalRef.current;
       if (!activeTerminal) {
         return;
@@ -552,13 +561,20 @@ export function TerminalViewport({
         return;
       }
 
+      if (event.type === "snapshot") {
+        hasHandledExitRef.current = false;
+        clearSelectionAction();
+        writeTerminalSnapshot(activeTerminal, event.snapshot);
+        return;
+      }
+
       if (event.type === "output") {
         activeTerminal.write(event.data);
         clearSelectionAction();
         return;
       }
 
-      if (event.type === "started" || event.type === "restarted") {
+      if (event.type === "restarted") {
         hasHandledExitRef.current = false;
         clearSelectionAction();
         writeTerminalSnapshot(activeTerminal, event.snapshot);
@@ -603,54 +619,16 @@ export function TerminalViewport({
         handleSessionExited();
       }, 0);
     };
-    const applyPendingTerminalEvents = (
-      terminalEventEntries: ReadonlyArray<{ id: number; event: TerminalEvent }>,
-    ) => {
-      const pendingEntries = selectPendingTerminalEventEntries(
-        terminalEventEntries,
-        lastAppliedTerminalEventIdRef.current,
-      );
-      if (pendingEntries.length === 0) {
-        return;
-      }
-      for (const entry of pendingEntries) {
-        applyTerminalEvent(entry.event);
-      }
-      lastAppliedTerminalEventIdRef.current =
-        pendingEntries.at(-1)?.id ?? lastAppliedTerminalEventIdRef.current;
-    };
-
-    const unsubscribeTerminalEvents = useTerminalStateStore.subscribe((state, previousState) => {
-      if (!terminalHydratedRef.current) {
-        return;
-      }
-
-      const previousLastEntryId =
-        selectTerminalEventEntries(
-          previousState.terminalEventEntriesByKey,
-          threadRef,
-          terminalId,
-        ).at(-1)?.id ?? 0;
-      const nextEntries = selectTerminalEventEntries(
-        state.terminalEventEntriesByKey,
-        threadRef,
-        terminalId,
-      );
-      const nextLastEntryId = nextEntries.at(-1)?.id ?? 0;
-      if (nextLastEntryId === previousLastEntryId) {
-        return;
-      }
-
-      applyPendingTerminalEvents(nextEntries);
-    });
-
-    const openTerminal = async () => {
-      try {
-        const activeTerminal = terminalRef.current;
-        const activeFitAddon = fitAddonRef.current;
-        if (!activeTerminal || !activeFitAddon) return;
-        activeFitAddon.fit();
-        const snapshot = await api.terminal.open({
+    let unsubscribeAttach: (() => void) | null = null;
+    const attachTerminal = () => {
+      const activeTerminal = terminalRef.current;
+      const activeFitAddon = fitAddonRef.current;
+      if (!activeTerminal || !activeFitAddon) return;
+      activeFitAddon.fit();
+      unsubscribeAttach = attachTerminalSession({
+        environmentId,
+        client: api,
+        terminal: {
           threadId,
           terminalId,
           cwd,
@@ -658,35 +636,20 @@ export function TerminalViewport({
           cols: activeTerminal.cols,
           rows: activeTerminal.rows,
           ...(runtimeEnv ? { env: runtimeEnv } : {}),
-        });
-        if (disposed) return;
-        writeTerminalSnapshot(activeTerminal, snapshot);
-        const bufferedEntries = selectTerminalEventEntries(
-          useTerminalStateStore.getState().terminalEventEntriesByKey,
-          threadRef,
-          terminalId,
-        );
-        const replayEntries = selectTerminalEventEntriesAfterSnapshot(
-          bufferedEntries,
-          snapshot.updatedAt,
-        );
-        for (const entry of replayEntries) {
-          applyTerminalEvent(entry.event);
-        }
-        lastAppliedTerminalEventIdRef.current = bufferedEntries.at(-1)?.id ?? 0;
-        terminalHydratedRef.current = true;
-        if (autoFocus) {
-          window.requestAnimationFrame(() => {
-            activeTerminal.focus();
-          });
-        }
-      } catch (err) {
-        if (disposed) return;
-        writeSystemMessage(
-          terminal,
-          err instanceof Error ? err.message : "Failed to open terminal",
-        );
-      }
+        },
+        onEvent: (event) => {
+          if (disposed) return;
+          applyAttachEvent(event);
+        },
+        onSnapshot: () => {
+          if (disposed) return;
+          if (autoFocus) {
+            window.requestAnimationFrame(() => {
+              activeTerminal.focus();
+            });
+          }
+        },
+      });
     };
 
     const fitTimer = window.setTimeout(() => {
@@ -708,13 +671,12 @@ export function TerminalViewport({
         })
         .catch(() => undefined);
     }, 30);
-    void openTerminal();
+    attachTerminal();
 
     return () => {
       disposed = true;
-      terminalHydratedRef.current = false;
-      lastAppliedTerminalEventIdRef.current = 0;
-      unsubscribeTerminalEvents();
+      unsubscribeAttach?.();
+      unsubscribeAttach = null;
       window.clearTimeout(fitTimer);
       inputDisposable.dispose();
       selectionDisposable.dispose();
@@ -800,6 +762,7 @@ interface ThreadTerminalDrawerProps {
   onCloseTerminal: (terminalId: string) => void;
   onHeightChange: (height: number) => void;
   onAddTerminalContext: (selection: TerminalContextSelection) => void;
+  keybindings: ResolvedKeybindingsConfig;
 }
 
 interface TerminalActionButtonProps {
@@ -853,6 +816,7 @@ export default function ThreadTerminalDrawer({
   onCloseTerminal,
   onHeightChange,
   onAddTerminalContext,
+  keybindings,
 }: ThreadTerminalDrawerProps) {
   const [drawerHeight, setDrawerHeight] = useState(() => clampDrawerHeight(height));
   const [resizeEpoch, setResizeEpoch] = useState(0);
@@ -1171,6 +1135,7 @@ export default function ThreadTerminalDrawer({
                         autoFocus={terminalId === resolvedActiveTerminalId}
                         resizeEpoch={resizeEpoch}
                         drawerHeight={drawerHeight}
+                        keybindings={keybindings}
                       />
                     </div>
                   </div>
@@ -1193,6 +1158,7 @@ export default function ThreadTerminalDrawer({
                   autoFocus
                   resizeEpoch={resizeEpoch}
                   drawerHeight={drawerHeight}
+                  keybindings={keybindings}
                 />
               </div>
             )}

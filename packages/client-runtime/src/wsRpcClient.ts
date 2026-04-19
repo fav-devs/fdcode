@@ -1,19 +1,21 @@
 import {
-  type GitActionProgressEvent,
-  type GitRunStackedActionInput,
   type GitRunStackedActionResult,
   type GitStatusResult,
   type GitStatusStreamEvent,
-  type LocalApi,
   ORCHESTRATION_WS_METHODS,
-  type ServerSettingsPatch,
   WS_METHODS,
 } from "@t3tools/contracts";
+import type { WsRpcClient } from "@t3tools/client-runtime";
 import { applyGitStatusStreamEvent } from "@t3tools/shared/git";
-import { Effect, Stream } from "effect";
 
-import { type WsRpcProtocolClient } from "./wsRpcProtocol";
+<<<<<<<< HEAD:apps/web/src/rpc/wsRpcClient.ts
+import { resetWsReconnectBackoff } from "./wsConnectionState";
 import { WsTransport } from "./wsTransport";
+
+export type { WsRpcClient };
+========
+import { type WsRpcProtocolClient } from "./wsRpcProtocol.ts";
+import { WsTransport } from "./wsTransport.ts";
 
 type RpcTag = keyof WsRpcProtocolClient & string;
 type RpcMethod<TTag extends RpcTag> = WsRpcProtocolClient[TTag];
@@ -56,12 +58,13 @@ export interface WsRpcClient {
   readonly reconnect: () => Promise<void>;
   readonly terminal: {
     readonly open: RpcUnaryMethod<typeof WS_METHODS.terminalOpen>;
+    readonly attach: RpcInputStreamMethod<typeof WS_METHODS.terminalAttach>;
     readonly write: RpcUnaryMethod<typeof WS_METHODS.terminalWrite>;
     readonly resize: RpcUnaryMethod<typeof WS_METHODS.terminalResize>;
     readonly clear: RpcUnaryMethod<typeof WS_METHODS.terminalClear>;
     readonly restart: RpcUnaryMethod<typeof WS_METHODS.terminalRestart>;
     readonly close: RpcUnaryMethod<typeof WS_METHODS.terminalClose>;
-    readonly onEvent: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalEvents>;
+    readonly onMetadata: RpcStreamMethod<typeof WS_METHODS.subscribeTerminalMetadata>;
   };
   readonly projects: {
     readonly searchEntries: RpcUnaryMethod<typeof WS_METHODS.projectsSearchEntries>;
@@ -120,21 +123,39 @@ export interface WsRpcClient {
     readonly subscribeThread: RpcInputStreamMethod<typeof ORCHESTRATION_WS_METHODS.subscribeThread>;
   };
 }
+>>>>>>>> upstream/t3code/mobile-remote-connect:packages/client-runtime/src/wsRpcClient.ts
 
-export function createWsRpcClient(transport: WsTransport): WsRpcClient {
+export interface CreateWsRpcClientOptions {
+  /** Runs immediately before `transport.reconnect()` (e.g. reset reconnect UI/backoff state). */
+  readonly beforeReconnect?: () => void;
+}
+
+export function createWsRpcClient(
+  transport: WsTransport,
+  options?: CreateWsRpcClientOptions,
+): WsRpcClient {
   return {
     dispose: () => transport.dispose(),
-    reconnect: () => transport.reconnect(),
+    reconnect: async () => {
+      options?.beforeReconnect?.();
+      await transport.reconnect();
+    },
     terminal: {
       open: (input) => transport.request((client) => client[WS_METHODS.terminalOpen](input)),
+      attach: (input, listener, options) =>
+        transport.subscribe(
+          (client) => client[WS_METHODS.terminalAttach](input),
+          listener,
+          options,
+        ),
       write: (input) => transport.request((client) => client[WS_METHODS.terminalWrite](input)),
       resize: (input) => transport.request((client) => client[WS_METHODS.terminalResize](input)),
       clear: (input) => transport.request((client) => client[WS_METHODS.terminalClear](input)),
       restart: (input) => transport.request((client) => client[WS_METHODS.terminalRestart](input)),
       close: (input) => transport.request((client) => client[WS_METHODS.terminalClose](input)),
-      onEvent: (listener, options) =>
+      onMetadata: (listener, options) =>
         transport.subscribe(
-          (client) => client[WS_METHODS.subscribeTerminalEvents]({}),
+          (client) => client[WS_METHODS.subscribeTerminalMetadata]({}),
           listener,
           options,
         ),

@@ -8,7 +8,8 @@ import {
   type OrchestrationShellStreamItem,
   type ServerConfig,
   type ServerProvider,
-  type TerminalEvent,
+  type TerminalAttachStreamEvent,
+  type TerminalMetadataStreamEvent,
   ThreadId,
 } from "@t3tools/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -30,7 +31,8 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
   };
 }
 
-const terminalEventListeners = new Set<(event: TerminalEvent) => void>();
+const terminalAttachListeners = new Set<(event: TerminalAttachStreamEvent) => void>();
+const terminalMetadataListeners = new Set<(event: TerminalMetadataStreamEvent) => void>();
 const shellStreamListeners = new Set<(event: OrchestrationShellStreamItem) => void>();
 const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
 
@@ -38,13 +40,16 @@ const rpcClientMock = {
   dispose: vi.fn(),
   terminal: {
     open: vi.fn(),
+    attach: vi.fn((_input: unknown, listener: (event: TerminalAttachStreamEvent) => void) =>
+      registerListener(terminalAttachListeners, listener),
+    ),
     write: vi.fn(),
     resize: vi.fn(),
     clear: vi.fn(),
     restart: vi.fn(),
     close: vi.fn(),
-    onEvent: vi.fn((listener: (event: TerminalEvent) => void) =>
-      registerListener(terminalEventListeners, listener),
+    onMetadata: vi.fn((listener: (event: TerminalMetadataStreamEvent) => void) =>
+      registerListener(terminalMetadataListeners, listener),
     ),
   },
   projects: {
@@ -275,7 +280,8 @@ beforeEach(() => {
   vi.resetModules();
   vi.clearAllMocks();
   showContextMenuFallbackMock.mockReset();
-  terminalEventListeners.clear();
+  terminalAttachListeners.clear();
+  terminalMetadataListeners.clear();
   shellStreamListeners.clear();
   gitStatusListeners.clear();
   const testWindow = getWindowForTest();
@@ -303,24 +309,42 @@ describe("wsApi", () => {
     expect(rpcClientMock.server.subscribeLifecycle).not.toHaveBeenCalled();
   });
 
-  it("forwards terminal and shell stream events", async () => {
+  it("forwards terminal attach, metadata, and shell stream events", async () => {
     const { createEnvironmentApi } = await import("./environmentApi");
 
     const api = createEnvironmentApi(rpcClientMock as never);
-    const onTerminalEvent = vi.fn();
+    const onTerminalAttachEvent = vi.fn();
+    const onTerminalMetadataEvent = vi.fn();
     const onShellEvent = vi.fn();
 
-    api.terminal.onEvent(onTerminalEvent);
+    api.terminal.attach({ threadId: "thread-1", terminalId: "terminal-1" }, onTerminalAttachEvent);
+    api.terminal.onMetadata(onTerminalMetadataEvent);
     api.orchestration.subscribeShell(onShellEvent);
 
-    const terminalEvent = {
+    const terminalAttachEvent = {
       threadId: "thread-1",
       terminalId: "terminal-1",
-      createdAt: "2026-02-24T00:00:00.000Z",
       type: "output",
       data: "hello",
-    } as const;
-    emitEvent(terminalEventListeners, terminalEvent);
+    } satisfies TerminalAttachStreamEvent;
+    emitEvent(terminalAttachListeners, terminalAttachEvent);
+
+    const terminalMetadataEvent = {
+      type: "upsert",
+      terminal: {
+        threadId: "thread-1",
+        terminalId: "terminal-1",
+        cwd: "/tmp/workspace",
+        worktreePath: null,
+        status: "running",
+        pid: 123,
+        exitCode: null,
+        exitSignal: null,
+        hasRunningSubprocess: true,
+        updatedAt: "2026-02-24T00:00:00.000Z",
+      },
+    } satisfies TerminalMetadataStreamEvent;
+    emitEvent(terminalMetadataListeners, terminalMetadataEvent);
 
     const shellEvent = {
       kind: "project-upserted" as const,
@@ -340,7 +364,8 @@ describe("wsApi", () => {
     } satisfies OrchestrationShellStreamItem;
     emitEvent(shellStreamListeners, shellEvent);
 
-    expect(onTerminalEvent).toHaveBeenCalledWith(terminalEvent);
+    expect(onTerminalAttachEvent).toHaveBeenCalledWith(terminalAttachEvent);
+    expect(onTerminalMetadataEvent).toHaveBeenCalledWith(terminalMetadataEvent);
     expect(onShellEvent).toHaveBeenCalledWith(shellEvent);
   });
 
@@ -530,13 +555,20 @@ describe("wsApi", () => {
   });
 
   it("reads and writes persistence through the desktop bridge when available", async () => {
-    const getClientSettings = vi.fn().mockResolvedValue({
+    const clientSettings = {
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
+      sidebarProjectGroupingMode: "repository_path" as const,
+      sidebarProjectGroupingOverrides: {
+        "environment-local:/tmp/project": "separate" as const,
+      },
+      sidebarProjectSortOrder: "manual" as const,
+      sidebarThreadSortOrder: "created_at" as const,
+      timestampFormat: "24-hour" as const,
+    };
+    const getClientSettings = vi.fn().mockResolvedValue({
+      ...clientSettings,
     });
     const setClientSettings = vi.fn().mockResolvedValue(undefined);
     const getSavedEnvironmentRegistry = vi.fn().mockResolvedValue([]);
@@ -558,14 +590,7 @@ describe("wsApi", () => {
     const api = createLocalApi(rpcClientMock as never);
 
     await api.persistence.getClientSettings();
-    await api.persistence.setClientSettings({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    await api.persistence.setClientSettings(clientSettings);
     await api.persistence.getSavedEnvironmentRegistry();
     await api.persistence.setSavedEnvironmentRegistry([]);
     await api.persistence.getSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
@@ -576,14 +601,7 @@ describe("wsApi", () => {
     await api.persistence.removeSavedEnvironmentSecret(EnvironmentId.make("environment-local"));
 
     expect(getClientSettings).toHaveBeenCalledWith();
-    expect(setClientSettings).toHaveBeenCalledWith({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    expect(setClientSettings).toHaveBeenCalledWith(clientSettings);
     expect(getSavedEnvironmentRegistry).toHaveBeenCalledWith();
     expect(setSavedEnvironmentRegistry).toHaveBeenCalledWith([]);
     expect(getSavedEnvironmentSecret).toHaveBeenCalledWith("environment-local");
@@ -594,15 +612,20 @@ describe("wsApi", () => {
   it("falls back to browser storage for persistence when the desktop bridge is missing", async () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
-
-    await api.persistence.setClientSettings({
+    const clientSettings = {
       confirmThreadArchive: true,
       confirmThreadDelete: false,
       diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+      sidebarProjectGroupingMode: "repository_path" as const,
+      sidebarProjectGroupingOverrides: {
+        "environment-local:/tmp/project": "separate" as const,
+      },
+      sidebarProjectSortOrder: "manual" as const,
+      sidebarThreadSortOrder: "created_at" as const,
+      timestampFormat: "24-hour" as const,
+    };
+
+    await api.persistence.setClientSettings(clientSettings);
     await api.persistence.setSavedEnvironmentRegistry([
       {
         environmentId: EnvironmentId.make("environment-local"),
@@ -618,14 +641,7 @@ describe("wsApi", () => {
       "bearer-token",
     );
 
-    await expect(api.persistence.getClientSettings()).resolves.toEqual({
-      confirmThreadArchive: true,
-      confirmThreadDelete: false,
-      diffWordWrap: true,
-      sidebarProjectSortOrder: "manual",
-      sidebarThreadSortOrder: "created_at",
-      timestampFormat: "24-hour",
-    });
+    await expect(api.persistence.getClientSettings()).resolves.toEqual(clientSettings);
     await expect(api.persistence.getSavedEnvironmentRegistry()).resolves.toEqual([
       {
         environmentId: EnvironmentId.make("environment-local"),

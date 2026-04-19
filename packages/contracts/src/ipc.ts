@@ -19,30 +19,32 @@ import type {
   GitStatusInput,
   GitStatusResult,
   GitCreateBranchResult,
-} from "./git";
-import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem";
+} from "./git.ts";
+import type { FilesystemBrowseInput, FilesystemBrowseResult } from "./filesystem.ts";
 import type {
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
-} from "./project";
+} from "./project.ts";
 import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
-} from "./server";
+} from "./server.ts";
 import type {
+  TerminalAttachInput,
+  TerminalAttachStreamEvent,
   TerminalClearInput,
   TerminalCloseInput,
-  TerminalEvent,
+  TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
   TerminalSessionSnapshot,
   TerminalWriteInput,
-} from "./terminal";
-import type { ServerUpsertKeybindingInput } from "./server";
+} from "./terminal.ts";
+import type { ServerUpsertKeybindingInput } from "./server.ts";
 import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
@@ -52,16 +54,17 @@ import type {
   OrchestrationShellStreamItem,
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
-} from "./orchestration";
-import type { EnvironmentId } from "./baseSchemas";
-import { EditorId } from "./editor";
-import { ClientSettings, ServerSettings, ServerSettingsPatch } from "./settings";
+} from "./orchestration.ts";
+import type { EnvironmentId } from "./baseSchemas.ts";
+import { EditorId } from "./editor.ts";
+import { ServerSettings, type ClientSettings, type ServerSettingsPatch } from "./settings.ts";
 
 export interface ContextMenuItem<T extends string = string> {
   id: T;
   label: string;
   destructive?: boolean;
   disabled?: boolean;
+  children?: readonly ContextMenuItem<T>[];
 }
 
 export type DesktopUpdateStatus =
@@ -235,12 +238,24 @@ export interface LocalApi {
 export interface EnvironmentApi {
   terminal: {
     open: (input: typeof TerminalOpenInput.Encoded) => Promise<TerminalSessionSnapshot>;
+    attach: (
+      input: typeof TerminalAttachInput.Encoded,
+      callback: (event: TerminalAttachStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
     write: (input: typeof TerminalWriteInput.Encoded) => Promise<void>;
     resize: (input: typeof TerminalResizeInput.Encoded) => Promise<void>;
     clear: (input: typeof TerminalClearInput.Encoded) => Promise<void>;
     restart: (input: typeof TerminalRestartInput.Encoded) => Promise<TerminalSessionSnapshot>;
     close: (input: typeof TerminalCloseInput.Encoded) => Promise<void>;
-    onEvent: (callback: (event: TerminalEvent) => void) => () => void;
+    onMetadata: (
+      callback: (event: TerminalMetadataStreamEvent) => void,
+      options?: {
+        onResubscribe?: () => void;
+      },
+    ) => () => void;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

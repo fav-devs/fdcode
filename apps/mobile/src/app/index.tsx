@@ -88,7 +88,7 @@ export default function HomeRouteScreen() {
                 letterSpacing: -0.4,
               }}
             >
-              fdcode
+              T3 Code
             </RNText>
             <View
               style={{

@@ -1,13 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
   createTerminalSessionManager,
+  EMPTY_KNOWN_TERMINAL_SESSIONS_ATOM,
   EMPTY_TERMINAL_SESSION_ATOM,
-  EMPTY_TERMINAL_SESSION_STATE,
-  getTerminalSessionTargetKey,
+  getKnownTerminalSessionTarget,
+  getKnownTerminalSessionListFilter,
   knownTerminalSessionsAtom,
   terminalSessionStateAtom,
+  type TerminalSessionTarget,
   type TerminalSessionState,
 } from "@t3tools/client-runtime";
+import type {
+  EnvironmentId,
+  TerminalAttachInput,
+  TerminalMetadataStreamEvent,
+  TerminalSessionSnapshot,
+} from "@t3tools/contracts";
 import { useMemo } from "react";
 
 import { appAtomRegistry } from "./atom-registry";
@@ -16,23 +24,42 @@ export const terminalSessionManager = createTerminalSessionManager({
   getRegistry: () => appAtomRegistry,
 });
 
-export function useTerminalSession(input: {
-  readonly environmentId: string | null;
-  readonly threadId: string | null;
-  readonly terminalId: string | null;
-}): TerminalSessionState {
-  const targetKey = getTerminalSessionTargetKey(input);
-  const state = useAtomValue(
-    targetKey !== null ? terminalSessionStateAtom(targetKey) : EMPTY_TERMINAL_SESSION_ATOM,
-  );
-  return targetKey === null ? EMPTY_TERMINAL_SESSION_STATE : state;
+export function subscribeTerminalMetadata(input: {
+  readonly environmentId: EnvironmentId;
+  readonly client: {
+    readonly terminal: {
+      readonly onMetadata: (
+        listener: (event: TerminalMetadataStreamEvent) => void,
+        options?: { readonly onResubscribe?: () => void },
+      ) => () => void;
+    };
+  };
+}) {
+  return terminalSessionManager.subscribeMetadata(input);
 }
 
-export function useTerminalSessionTarget(input: {
-  readonly environmentId: string | null;
-  readonly threadId: string | null;
-  readonly terminalId: string | null;
+export function attachTerminalSession(input: {
+  readonly environmentId: EnvironmentId;
+  readonly client: Parameters<typeof terminalSessionManager.attach>[0]["client"];
+  readonly terminal: TerminalAttachInput;
+  readonly onSnapshot?: (snapshot: TerminalSessionSnapshot) => void;
 }) {
+  return terminalSessionManager.attach({
+    environmentId: input.environmentId,
+    client: input.client,
+    terminal: input.terminal,
+    ...(input.onSnapshot ? { onSnapshot: input.onSnapshot } : {}),
+  });
+}
+
+export function useTerminalSession(input: TerminalSessionTarget): TerminalSessionState {
+  const target = getKnownTerminalSessionTarget(input);
+  return useAtomValue(
+    target !== null ? terminalSessionStateAtom(target) : EMPTY_TERMINAL_SESSION_ATOM,
+  );
+}
+
+export function useTerminalSessionTarget(input: TerminalSessionTarget) {
   return useMemo(
     () => ({
       environmentId: input.environmentId,
@@ -44,20 +71,11 @@ export function useTerminalSessionTarget(input: {
 }
 
 export function useKnownTerminalSessions(input: {
-  readonly environmentId: string | null;
-  readonly threadId: string | null;
+  readonly environmentId: TerminalSessionTarget["environmentId"];
+  readonly threadId: TerminalSessionTarget["threadId"];
 }) {
-  const knownSessionsIndex = useAtomValue(knownTerminalSessionsAtom);
-
-  return useMemo(() => {
-    if (input.environmentId === null || input.threadId === null) {
-      return [];
-    }
-
-    void knownSessionsIndex;
-    return terminalSessionManager.listSessions({
-      environmentId: input.environmentId,
-      threadId: input.threadId,
-    });
-  }, [input.environmentId, input.threadId, knownSessionsIndex]);
+  const filter = getKnownTerminalSessionListFilter(input);
+  return useAtomValue(
+    filter !== null ? knownTerminalSessionsAtom(filter) : EMPTY_KNOWN_TERMINAL_SESSIONS_ATOM,
+  );
 }

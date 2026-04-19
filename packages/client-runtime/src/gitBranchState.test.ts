@@ -1,4 +1,4 @@
-import type { GitListBranchesResult } from "@t3tools/contracts";
+import { EnvironmentId, type GitListBranchesResult } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -7,7 +7,7 @@ import {
   EMPTY_GIT_BRANCH_STATE,
   gitBranchStateAtom,
   type GitBranchClient,
-} from "./gitBranchState";
+} from "./gitBranchState.ts";
 
 let atomRegistry = AtomRegistry.make();
 
@@ -16,7 +16,7 @@ function resetAtomRegistry() {
   atomRegistry = AtomRegistry.make();
 }
 
-const TARGET = { environmentId: "env-local", cwd: "/repo" } as const;
+const TARGET = { environmentId: EnvironmentId.make("env-local"), cwd: "/repo" } as const;
 
 const FIRST_PAGE: GitListBranchesResult = {
   branches: [

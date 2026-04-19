@@ -3,7 +3,7 @@ import { useCallback, useMemo, useState } from "react";
 import * as Arr from "effect/Array";
 import * as Option from "effect/Option";
 import { pipe } from "effect/Function";
-import type { ProjectScript } from "@t3tools/contracts";
+import { EnvironmentId, type ProjectScript } from "@t3tools/contracts";
 import { projectScriptCwd, projectScriptRuntimeEnv } from "@t3tools/shared/projectScripts";
 import { Pressable, ScrollView, Text as RNText, View, useColorScheme } from "react-native";
 import { useThemeColor } from "../../lib/useThemeColor";
@@ -18,11 +18,10 @@ import { connectionTone } from "../connection/connectionTone";
 
 import { useRemoteCatalog } from "../../state/use-remote-catalog";
 import {
-  getEnvironmentClient,
   useRemoteConnectionStatus,
   useRemoteEnvironmentState,
 } from "../../state/use-remote-environment-registry";
-import { terminalSessionManager, useKnownTerminalSessions } from "../../state/use-terminal-session";
+import { useKnownTerminalSessions } from "../../state/use-terminal-session";
 import { useSelectedThreadDetail } from "../../state/use-thread-detail";
 import { useThreadSelection } from "../../state/use-thread-selection";
 import { GitActionProgressOverlay } from "./GitActionProgressOverlay";
@@ -30,16 +29,19 @@ import {
   buildTerminalMenuSessions,
   nextTerminalId,
   resolveProjectScriptTerminalId,
-} from "./terminalMenu";
-import { resolvePreferredThreadWorktreePath } from "./terminalLaunchContext";
+} from "../terminal/terminalMenu";
+import {
+  resolvePreferredThreadWorktreePath,
+  stagePendingTerminalLaunch,
+} from "../terminal/terminalLaunchContext";
 import { ThreadDetailScreen } from "./ThreadDetailScreen";
 import { ThreadGitControls } from "./ThreadGitControls";
 import { ThreadNavigationDrawer } from "./ThreadNavigationDrawer";
-import { useSelectedThreadCommands } from "./use-selected-thread-commands";
-import { useSelectedThreadGitActions } from "./use-selected-thread-git-actions";
-import { useSelectedThreadGitState } from "./use-selected-thread-git-state";
-import { useSelectedThreadWorktree } from "./use-selected-thread-worktree";
-import { useThreadComposerState } from "./use-thread-composer-state";
+import { useSelectedThreadCommands } from "../../state/use-selected-thread-commands";
+import { useSelectedThreadGitActions } from "../../state/use-selected-thread-git-actions";
+import { useSelectedThreadGitState } from "../../state/use-selected-thread-git-state";
+import { useSelectedThreadWorktree } from "../../state/use-selected-thread-worktree";
+import { useThreadComposerState } from "../../state/use-thread-composer-state";
 
 function firstRouteParam(value: string | string[] | undefined): string | null {
   if (Array.isArray(value)) {
@@ -74,7 +76,8 @@ export function ThreadRouteScreen() {
     threadId?: string | string[];
   }>();
   const [drawerVisible, setDrawerVisible] = useState(false);
-  const environmentId = firstRouteParam(params.environmentId);
+  const environmentIdRaw = firstRouteParam(params.environmentId);
+  const environmentId = environmentIdRaw ? EnvironmentId.make(environmentIdRaw) : null;
   const threadId = firstRouteParam(params.threadId);
   const routeEnvironmentRuntime = environmentId
     ? (environmentStateById[environmentId] ?? null)
@@ -91,7 +94,7 @@ export function ThreadRouteScreen() {
 
   /* ─── Git status for native header trigger ───────────────────────── */
   const gitStatus = useGitStatus({
-    environmentId: selectedThread?.environmentId ?? "",
+    environmentId: selectedThread?.environmentId ?? null,
     cwd: selectedThreadCwd,
   });
   const knownTerminalSessions = useKnownTerminalSessions({
@@ -166,11 +169,6 @@ export function ThreadRouteScreen() {
         return;
       }
 
-      const client = getEnvironmentClient(selectedThread.environmentId);
-      if (!client) {
-        return;
-      }
-
       const targetTerminalId = resolveProjectScriptTerminalId({
         existingTerminalIds: terminalMenuSessions.map((session) => session.terminalId),
         hasRunningTerminal: terminalMenuSessions.some(
@@ -189,23 +187,20 @@ export function ThreadRouteScreen() {
         project: { cwd: selectedThreadProject.workspaceRoot },
         worktreePath: preferredWorktreePath,
       });
-      const snapshot = await client.terminal.open({
-        threadId: selectedThread.id,
-        terminalId: targetTerminalId,
-        cwd,
-        worktreePath: preferredWorktreePath,
-        env,
+      stagePendingTerminalLaunch({
+        target: {
+          environmentId: selectedThread.environmentId,
+          threadId: selectedThread.id,
+          terminalId: targetTerminalId,
+        },
+        launch: {
+          cwd,
+          worktreePath: preferredWorktreePath,
+          env,
+          initialInput: `${script.command}\r`,
+        },
       });
 
-      terminalSessionManager.syncSnapshot(
-        { environmentId: selectedThread.environmentId },
-        snapshot,
-      );
-      await client.terminal.write({
-        threadId: selectedThread.id,
-        terminalId: targetTerminalId,
-        data: `${script.command}\r`,
-      });
       void router.push(buildThreadTerminalRoutePath(selectedThread, targetTerminalId));
     },
     [

@@ -1,13 +1,13 @@
 import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
 import { MenuView } from "@react-native-menu/menu";
 import type {
+  EnvironmentId,
   ModelSelection,
   OrchestrationThread,
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig as T3ServerConfig,
 } from "@t3tools/contracts";
-import { CLAUDE_CODE_EFFORT_OPTIONS } from "@t3tools/contracts";
 import {
   detectComposerTrigger,
   replaceTextRange,
@@ -36,13 +36,14 @@ import { ProviderIcon } from "../../components/ProviderIcon";
 import type { DraftComposerImageAttachment } from "../../lib/composerImages";
 import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
 import type { RemoteClientConnectionState } from "../../lib/connection";
-import { useNativePaste } from "../../hooks/useNativePaste";
+import { useNativePaste } from "../../lib/useNativePaste";
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
 } from "@t3tools/shared/searchRanking";
 import { getEnvironmentClient } from "../../state/use-remote-environment-registry";
+import { CLAUDE_AGENT_EFFORT_OPTIONS } from "./claudeEffortOptions";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
 
 /**
@@ -67,7 +68,7 @@ export interface ThreadComposerProps {
   readonly serverConfig: T3ServerConfig | null;
   readonly queueCount: number;
   readonly activeThreadBusy: boolean;
-  readonly environmentId: string;
+  readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly onChangeDraftMessage: (value: string) => void;
   readonly onPickDraftImages: () => Promise<void>;
@@ -494,7 +495,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         id: "options-effort",
         title: "Effort",
         subtitle: `${currentEffort.charAt(0).toUpperCase()}${currentEffort.slice(1)}`,
-        subactions: CLAUDE_CODE_EFFORT_OPTIONS.map((level) => ({
+        subactions: CLAUDE_AGENT_EFFORT_OPTIONS.map((level) => ({
           id: `options:effort:${level}`,
           title: `${level}${level === "high" ? " (default)" : ""}`,
           state: currentEffort === level ? ("on" as const) : undefined,
@@ -596,9 +597,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
     if (event.startsWith("options:fast-mode:")) {
       const fastMode = event.endsWith(":on");
+      const nextFast = fastMode || undefined;
+      if (currentModelSelection.provider === "opencode") {
+        return;
+      }
       const updated: ModelSelection = {
         ...currentModelSelection,
-        options: { ...currentModelSelection.options, fastMode: fastMode || undefined },
+        options: { ...currentModelSelection.options, fastMode: nextFast },
       };
       void props.onUpdateModelSelection(updated);
       return;
