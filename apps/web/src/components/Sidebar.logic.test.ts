@@ -659,6 +659,7 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   return {
     id: ProjectId.make("project-1"),
     environmentId: localEnvironmentId,
+    kind: "project" as const,
     name: "Project",
     cwd: "/tmp/project",
     defaultModelSelection: {
