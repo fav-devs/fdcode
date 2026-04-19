@@ -85,9 +85,7 @@ function RightPanelContent({
       <div
         className={cn(
           "flex shrink-0 items-center gap-1 border-b border-border px-3",
-          shouldUseDragRegion
-            ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)]"
-            : "h-11",
+          shouldUseDragRegion ? "drag-region h-[52px] wco:h-[env(titlebar-area-height)]" : "h-11",
         )}
       >
         <div className="flex items-center gap-0.5 [-webkit-app-region:no-drag]">
@@ -155,7 +153,15 @@ const RightPanelInlineSidebar = (props: {
   onSwitchToDiff: () => void;
   onSwitchToFiles: () => void;
 }) => {
-  const { panelOpen, activeView, mountedViews, onClose, onOpenChange, onSwitchToDiff, onSwitchToFiles } = props;
+  const {
+    panelOpen,
+    activeView,
+    mountedViews,
+    onClose,
+    onOpenChange,
+    onSwitchToDiff,
+    onSwitchToFiles,
+  } = props;
 
   const shouldAcceptInlineSidebarWidth = useCallback(
     ({ nextWidth, wrapper }: { nextWidth: number; wrapper: HTMLElement }) => {
@@ -313,10 +319,7 @@ function ChatThreadRouteView() {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
-      search: (previous) => {
-        const { diff: _diff, ...rest } = stripFileSearchParams(previous);
-        return rest;
-      },
+      search: (previous) => stripFileSearchParams(stripDiffSearchParams(previous)),
     });
   }, [navigate, threadRef]);
 
@@ -362,7 +365,7 @@ function ChatThreadRouteView() {
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(threadRef),
       search: (previous) => {
-        const { diff: _diff, ...rest } = stripDiffSearchParams(previous);
+        const rest = stripDiffSearchParams(previous);
         return { ...rest, files: "1" };
       },
     });
@@ -399,7 +402,6 @@ function ChatThreadRouteView() {
           <ChatView
             environmentId={threadRef.environmentId}
             threadId={threadRef.threadId}
-            onDiffPanelOpen={openDiff}
             reserveTitleBarControlInset={!panelOpen}
             routeKind="server"
           />
@@ -424,7 +426,6 @@ function ChatThreadRouteView() {
         <ChatView
           environmentId={threadRef.environmentId}
           threadId={threadRef.threadId}
-          onDiffPanelOpen={openDiff}
           routeKind="server"
         />
         <AppStatusBar />
