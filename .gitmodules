@@ -1,0 +1,9 @@
+[submodule "inspo/dpcode"]
+	path = inspo/dpcode
+	url = https://github.com/Emanuele-web04/dpcode
+	branch = main
+
+[submodule "inspo/paseo"]
+	path = inspo/paseo
+	url = https://github.com/fav-devs/paseo
+	branch = main
