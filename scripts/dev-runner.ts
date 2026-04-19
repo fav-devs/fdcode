@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
+import * as NodeFs from "node:fs";
 import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -39,6 +41,17 @@ type DevMode = keyof typeof MODE_ARGS;
 type PortAvailabilityCheck<R = never> = (port: number) => Effect.Effect<boolean, never, R>;
 
 const DEV_RUNNER_MODES = Object.keys(MODE_ARGS) as Array<DevMode>;
+
+function resolveTurboCommand(cwd: string): string {
+  const localTurboPath = NodePath.join(
+    cwd,
+    "node_modules",
+    ".bin",
+    process.platform === "win32" ? "turbo.cmd" : "turbo",
+  );
+
+  return NodeFs.existsSync(localTurboPath) ? localTurboPath : "turbo";
+}
 
 class DevRunnerError extends Data.TaggedError("DevRunnerError")<{
   readonly message: string;
@@ -431,7 +444,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput) {
     }
 
     const child = yield* ChildProcess.make(
-      "turbo",
+      resolveTurboCommand(process.cwd()),
       [...MODE_ARGS[input.mode], ...input.turboArgs],
       {
         stdin: "inherit",

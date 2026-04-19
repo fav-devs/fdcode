@@ -19,12 +19,28 @@ export type SettingsSectionPath =
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
+  description: string;
   to: SettingsSectionPath;
   icon: ComponentType<{ className?: string }>;
 }> = [
-  { label: "General", to: "/settings/general", icon: Settings2Icon },
-  { label: "Connections", to: "/settings/connections", icon: Link2Icon },
-  { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
+  {
+    label: "General",
+    description: "Theme, behavior, and defaults.",
+    to: "/settings/general",
+    icon: Settings2Icon,
+  },
+  {
+    label: "Connections",
+    description: "Pairing, remote backends, and sessions.",
+    to: "/settings/connections",
+    icon: Link2Icon,
+  },
+  {
+    label: "Archive",
+    description: "Review and restore archived threads.",
+    to: "/settings/archived",
+    icon: ArchiveIcon,
+  },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
@@ -34,6 +50,14 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
     <>
       <SidebarContent className="overflow-x-hidden">
         <SidebarGroup className="px-2 py-3">
+          <div className="px-2 pb-2">
+            <div className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/52">
+              Preferences
+            </div>
+            <div className="mt-1 text-[11px] leading-5 text-muted-foreground/68">
+              Configure the app shell, providers, and thread management.
+            </div>
+          </div>
           <SidebarMenu>
             {SETTINGS_NAV_ITEMS.map((item) => {
               const Icon = item.icon;
@@ -45,19 +69,30 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     isActive={isActive}
                     className={
                       isActive
-                        ? "gap-2.5 px-2.5 py-2 text-left text-[13px] font-medium text-foreground"
-                        : "gap-2.5 px-2.5 py-2 text-left text-[13px] text-muted-foreground/70 hover:text-foreground/80"
+                        ? "h-auto items-start gap-2.5 rounded-2xl border border-border/60 bg-background/72 px-3 py-3 text-left text-[13px] font-medium text-foreground shadow-sm backdrop-blur"
+                        : "h-auto items-start gap-2.5 rounded-2xl px-3 py-3 text-left text-[13px] text-muted-foreground/74 hover:bg-background/44 hover:text-foreground/84"
                     }
                     onClick={() => void navigate({ to: item.to, replace: true })}
                   >
                     <Icon
                       className={
                         isActive
-                          ? "size-4 shrink-0 text-foreground"
-                          : "size-4 shrink-0 text-muted-foreground/60"
+                          ? "mt-0.5 size-4 shrink-0 text-foreground"
+                          : "mt-0.5 size-4 shrink-0 text-muted-foreground/58"
                       }
                     />
-                    <span className="truncate">{item.label}</span>
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate">{item.label}</div>
+                      <div
+                        className={
+                          isActive
+                            ? "mt-0.5 text-[11px] font-normal leading-4 text-muted-foreground/78"
+                            : "mt-0.5 text-[11px] font-normal leading-4 text-muted-foreground/60"
+                        }
+                      >
+                        {item.description}
+                      </div>
+                    </div>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );

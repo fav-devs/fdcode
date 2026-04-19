@@ -27,16 +27,16 @@ export function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section className="space-y-2.5">
-      <div className="flex items-center justify-between px-1">
-        <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-foreground/50">
-          <span className="inline-block h-px w-3 bg-border" aria-hidden />
+    <section className="space-y-3">
+      <div className="flex items-center justify-between px-1.5">
+        <h2 className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-foreground/46">
+          <span className="inline-block h-px w-4 bg-border/70" aria-hidden />
           {icon}
           {title}
         </h2>
         {headerAction}
       </div>
-      <div className="relative overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm/4 not-dark:bg-clip-padding before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-2xl)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] dark:shadow-none dark:before:shadow-[0_-1px_--theme(--color-white/6%)]">
+      <div className="relative overflow-hidden rounded-[24px] border border-border/60 bg-background/64 text-card-foreground shadow-[0_18px_50px_-32px_rgba(0,0,0,0.68)] backdrop-blur">
         {children}
       </div>
     </section>
@@ -115,8 +115,8 @@ export function SettingResetButton({ label, onClick }: { label: string; onClick:
 
 export function SettingsPageContainer({ children }: { children: ReactNode }) {
   return (
-    <div className="flex-1 overflow-y-auto p-6 sm:p-8">
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">{children}</div>
+    <div className="flex-1 overflow-y-auto px-6 pb-8 pt-4 sm:px-8 sm:pb-10 sm:pt-5">
+      <div className="mx-auto flex w-full max-w-2xl flex-col gap-8">{children}</div>
     </div>
   );
 }
