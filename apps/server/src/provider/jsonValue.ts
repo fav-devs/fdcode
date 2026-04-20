@@ -12,11 +12,7 @@ export function asNumber(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-export function asString(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
-}
-
 export function trimToUndefined(value: unknown): string | undefined {
-  const candidate = asString(value)?.trim();
+  const candidate = typeof value === "string" ? value.trim() : undefined;
   return candidate && candidate.length > 0 ? candidate : undefined;
 }
