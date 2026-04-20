@@ -1,11 +1,13 @@
 import { Effect, FileSystem, Option, Path, Schema } from "effect";
 
 import { type ServerConfigShape } from "./config.ts";
+import { readLinuxProcessStartTicks } from "./processIdentity.ts";
 import { formatHostForUrl, isWildcardHost } from "./startupAccess.ts";
 
 export const PersistedServerRuntimeState = Schema.Struct({
   version: Schema.Literal(1),
   pid: Schema.Int,
+  processStartTicks: Schema.optional(Schema.Int),
   host: Schema.optional(Schema.String),
   port: Schema.Int,
   origin: Schema.String,
@@ -29,14 +31,18 @@ const runtimeOriginForConfig = (
 export const makePersistedServerRuntimeState = (input: {
   readonly config: Pick<ServerConfigShape, "host">;
   readonly port: number;
-}): PersistedServerRuntimeState => ({
-  version: 1,
-  pid: process.pid,
-  ...(input.config.host ? { host: input.config.host } : {}),
-  port: input.port,
-  origin: runtimeOriginForConfig(input.config, input.port),
-  startedAt: new Date().toISOString(),
-});
+}): PersistedServerRuntimeState => {
+  const processStartTicks = readLinuxProcessStartTicks(process.pid);
+  return {
+    version: 1,
+    pid: process.pid,
+    ...(processStartTicks !== null ? { processStartTicks } : {}),
+    ...(input.config.host ? { host: input.config.host } : {}),
+    port: input.port,
+    origin: runtimeOriginForConfig(input.config, input.port),
+    startedAt: new Date().toISOString(),
+  };
+};
 
 export const persistServerRuntimeState = (input: {
   readonly path: string;
