@@ -219,6 +219,33 @@ it.layer(NodeServices.layer)("cli log-level parsing", (it) => {
     }),
   );
 
+  it.effect("treats runtime state as stale when pid start ticks do not match", () =>
+    Effect.gen(function* () {
+      const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-daemon-status-stale-ticks-"));
+      const config = yield* makeCliTestServerConfig(baseDir);
+      yield* persistServerRuntimeState({
+        path: config.serverRuntimeStatePath,
+        state: {
+          ...makePersistedServerRuntimeState({
+            config,
+            port: 3773,
+          }),
+          pid: process.pid,
+          processStartTicks: Number.MAX_SAFE_INTEGER,
+        },
+      }).pipe(Effect.provide(NodeServices.layer));
+
+      const { output } = yield* captureStdout(
+        runCli(["daemon", "status", "--base-dir", baseDir, "--json"]),
+      );
+      const parsed = JSON.parse(output) as {
+        readonly status: string;
+      };
+
+      assert.equal(parsed.status, "stale");
+    }),
+  );
+
   it.effect("executes auth pairing subcommands and redacts secrets from list output", () =>
     Effect.gen(function* () {
       const baseDir = mkdtempSync(join(tmpdir(), "t3-cli-auth-pairing-test-"));

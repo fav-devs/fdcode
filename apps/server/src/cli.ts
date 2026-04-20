@@ -67,6 +67,7 @@ import {
   clearPersistedServerRuntimeState,
   readPersistedServerRuntimeState,
 } from "./serverRuntimeState.ts";
+import { readLinuxProcessStartTicks } from "./processIdentity.ts";
 import { WorkspacePaths } from "./workspace/Services/WorkspacePaths.ts";
 import { WorkspacePathsLive } from "./workspace/Layers/WorkspacePaths.ts";
 
@@ -444,6 +445,19 @@ const resolveDaemonStatus = Effect.fn("resolveDaemonStatus")(function* (
       startedAt: runtimeState.value.startedAt,
       logPath: config.serverLogPath,
     } satisfies CliDaemonStatus;
+  }
+
+  if (runtimeState.value.processStartTicks !== undefined) {
+    const currentProcessStartTicks = readLinuxProcessStartTicks(runtimeState.value.pid);
+    if (currentProcessStartTicks !== runtimeState.value.processStartTicks) {
+      return {
+        status: "stale",
+        pid: runtimeState.value.pid,
+        origin: runtimeState.value.origin,
+        startedAt: runtimeState.value.startedAt,
+        logPath: config.serverLogPath,
+      } satisfies CliDaemonStatus;
+    }
   }
 
   return {
