@@ -656,7 +656,12 @@ function SidebarRail({
   );
 }
 
-function SidebarInset({ className, children, ...props }: React.ComponentProps<"main">) {
+function SidebarInset({
+  className,
+  surfaceClassName,
+  children,
+  ...props
+}: React.ComponentProps<"main"> & { surfaceClassName?: string }) {
   return (
     <main
       className={cn(
@@ -672,7 +677,10 @@ function SidebarInset({ className, children, ...props }: React.ComponentProps<"m
       {...props}
     >
       <div
-        className="flex min-h-0 min-w-0 flex-1 flex-col rounded-[inherit] bg-background text-inherit md:peer-data-[variant=inset]:bg-transparent"
+        className={cn(
+          "flex min-h-0 min-w-0 flex-1 flex-col rounded-[inherit] bg-background text-inherit md:peer-data-[variant=inset]:bg-transparent",
+          surfaceClassName,
+        )}
         data-slot="sidebar-inset-surface"
       >
         {children}
