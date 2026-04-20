@@ -47,8 +47,8 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
   },
   copilot: {
     provider: "copilot",
-    title: "Copilot",
-    description: "Save additional Copilot model slugs for the picker and `/model` command.",
+    title: "GitHub Copilot",
+    description: "Save additional GitHub Copilot model slugs for the picker and `/model` command.",
     placeholder: "your-copilot-model-slug",
     example: "gpt-4.1",
   },
