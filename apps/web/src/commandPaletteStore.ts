@@ -25,8 +25,7 @@ export const useCommandPaletteStore = create<CommandPaletteStore>((set) => ({
   open: false,
   openIntent: null,
   workspaceTarget: null,
-  setOpen: (open) =>
-    set({ open, ...(open ? {} : { openIntent: null, workspaceTarget: null }) }),
+  setOpen: (open) => set({ open, ...(open ? {} : { openIntent: null, workspaceTarget: null }) }),
   toggleOpen: () =>
     set((state) => ({
       open: !state.open,

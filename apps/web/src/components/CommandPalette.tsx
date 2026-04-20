@@ -1242,7 +1242,8 @@ function OpenCommandPaletteDialog() {
     return useMetaForMod ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
   }
 
-  const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse" || workspaceTarget !== null;
+  const isSubmenu =
+    paletteMode === "submenu" || paletteMode === "submenu-browse" || workspaceTarget !== null;
   const inputPlaceholder = workspaceTarget
     ? "Open in split..."
     : getCommandPaletteInputPlaceholder(paletteMode);
