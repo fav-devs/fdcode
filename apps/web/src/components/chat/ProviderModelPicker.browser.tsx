@@ -334,7 +334,7 @@ describe("ProviderModelPicker", () => {
     }
   });
 
-  it("shows the real copilot provider alongside the coming-soon copilot badge item", async () => {
+  it("shows only the real copilot provider in the sidebar", async () => {
     const providers: ReadonlyArray<ServerProvider> = [
       TEST_PROVIDERS[0]!,
       buildCopilotProvider([
@@ -377,7 +377,7 @@ describe("ProviderModelPicker", () => {
 
       await vi.waitFor(() => {
         expect(getSidebarProviderOrder()).toContain("copilot");
-        expect(getSidebarProviderOrder()).toContain("github-copilot-coming-soon");
+        expect(getSidebarProviderOrder()).not.toContain("github-copilot-coming-soon");
       });
 
       await page.getByRole("button", { name: "Copilot", exact: true }).click();
