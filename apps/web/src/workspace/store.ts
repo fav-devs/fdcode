@@ -2542,12 +2542,40 @@ export const useWorkspaceStore = create<WorkspaceStoreState>()((set, get) => ({
       return;
     }
 
-    const nextDocument = splitWindowWithSurface(
+    const splitDocument = splitWindowWithSurface(
       current,
       windowId,
       axis,
       duplicateSurface(activeSurface),
     );
+
+    const nextWindowId = splitDocument.focusedWindowId;
+    const nextWindow = nextWindowId ? splitDocument.windowsById[nextWindowId] : null;
+    if (!nextWindowId || !nextWindow) {
+      set(setDocumentState(splitDocument));
+      return;
+    }
+
+    const nextSurfacesById = { ...splitDocument.surfacesById };
+    for (const surfaceId of getWindowTabIds(nextWindow)) {
+      delete nextSurfacesById[surfaceId];
+    }
+
+    const nextDocument: WorkspaceDocument = {
+      ...splitDocument,
+      windowsById: {
+        ...splitDocument.windowsById,
+        [nextWindowId]: {
+          ...nextWindow,
+          tabIds: [],
+          activeTabId: null,
+        },
+      },
+      surfacesById: nextSurfacesById,
+      focusedWindowId: nextWindowId,
+      mobileActiveWindowId: nextWindowId,
+    };
+
     set(setDocumentState(nextDocument));
   },
   setSplitNodeSizes: (nodeId, sizes) => {

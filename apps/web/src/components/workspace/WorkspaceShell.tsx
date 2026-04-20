@@ -12,10 +12,15 @@ import {
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { createThreadSelectorByRef } from "../../storeSelectors";
-import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectSidebarThreadsAcrossEnvironments,
+  useStore,
+} from "../../store";
 import { cn, newDraftId, newThreadId } from "../../lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { SidebarHeaderTrigger, SidebarInset } from "../ui/sidebar";
+import { ClaudeAI, Gemini, OpenAI } from "../Icons";
 import ChatView from "../ChatView";
 import { useComposerDraftStore } from "../../composerDraftStore";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../../diffRouteSearch";
@@ -51,6 +56,7 @@ import {
   type WorkspaceSurfaceInstance,
 } from "../../workspace/types";
 import { useSettings } from "~/hooks/useSettings";
+import { AppStatusBar } from "../AppStatusBar";
 
 const WORKSPACE_MIN_PANE_SIZE_PX = 220;
 const WORKSPACE_DROP_EDGE_THRESHOLD = 0.22;
@@ -200,14 +206,127 @@ function WorkspaceEmptyState() {
   );
 }
 
+function resolveWorkspaceThreadPickerTitle(title: string | null | undefined): string {
+  if (!title?.trim()) {
+    return "New chat";
+  }
+
+  return title;
+}
+
+function WorkspaceThreadProviderGlyph(props: { provider: string | null | undefined }) {
+  if (props.provider === "claudeAgent") {
+    return <ClaudeAI aria-hidden="true" className="size-4 shrink-0" />;
+  }
+
+  if (props.provider === "gemini") {
+    return <Gemini aria-hidden="true" className="size-4 shrink-0" />;
+  }
+
+  return <OpenAI aria-hidden="true" className="size-4 shrink-0 text-muted-foreground/60" />;
+}
+
+const WorkspaceWindowEmptyState = memo(function WorkspaceWindowEmptyState(props: {
+  windowId: string;
+}) {
+  const threads = useStore(useShallow(selectSidebarThreadsAcrossEnvironments));
+  const projects = useStore(useShallow(selectProjectsAcrossEnvironments));
+  const openThreadSurfaceTab = useWorkspaceStore((state) => state.openThreadSurfaceTab);
+
+  const openedThreadKeys = useWorkspaceStore(
+    useShallow((state) => {
+      const keys = new Set<string>();
+      for (const win of Object.values(state.document.windowsById)) {
+        if (!win) continue;
+        for (const surfaceId of win.tabIds) {
+          const surface = state.document.surfacesById[surfaceId];
+          if (surface?.kind === "thread" && surface.input.scope === "server") {
+            keys.add(scopedThreadKey(surface.input.threadRef));
+          }
+        }
+      }
+      return keys;
+    }),
+  );
+
+  const projectNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const p of projects) {
+      map.set(p.id, p.name);
+    }
+    return map;
+  }, [projects]);
+
+  const displayThreads = useMemo(
+    () =>
+      threads
+        .filter(
+          (t) =>
+            !openedThreadKeys.has(
+              scopedThreadKey({ environmentId: t.environmentId, threadId: t.id }),
+            ),
+        )
+        .sort((a, b) => {
+          const aTime = a.latestUserMessageAt ?? a.createdAt;
+          const bTime = b.latestUserMessageAt ?? b.createdAt;
+          return bTime.localeCompare(aTime);
+        }),
+    [threads, openedThreadKeys],
+  );
+
+  return (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col items-center bg-background px-6 pt-16">
+      <div className="w-full max-w-sm space-y-4">
+        <p className="text-center text-sm font-medium text-foreground/70">Select a chat</p>
+        <div className="max-h-[60vh] space-y-1 overflow-y-auto">
+          {displayThreads.length === 0 ? (
+            <div className="rounded-lg border border-border/40 px-4 py-6 text-center text-sm text-muted-foreground/60">
+              No other chats available
+            </div>
+          ) : (
+            displayThreads.map((thread) => {
+              const projectName = projectNameById.get(thread.projectId) ?? "Project";
+              return (
+                <button
+                  key={`${thread.environmentId}:${thread.id}`}
+                  type="button"
+                  className="flex w-full items-center gap-3 rounded-lg border border-border/55 px-3 py-2 text-left transition-colors hover:bg-accent/40"
+                  onClick={() => {
+                    openThreadSurfaceTab(props.windowId, {
+                      scope: "server",
+                      threadRef: { environmentId: thread.environmentId, threadId: thread.id },
+                    });
+                  }}
+                >
+                  <WorkspaceThreadProviderGlyph provider={thread.session?.provider} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-foreground">
+                      {resolveWorkspaceThreadPickerTitle(thread.title)}
+                    </div>
+                    <div className="truncate text-xs text-muted-foreground">{projectName}</div>
+                  </div>
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export function WorkspaceShell() {
   const rootNodeId = useWorkspaceRootNodeId();
 
   return (
-    <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+    <SidebarInset
+      className="h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)] min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground md:peer-data-[variant=inset]:bg-transparent"
+      surfaceClassName="bg-transparent"
+    >
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
         {rootNodeId ? <WorkspaceLayoutRoot /> : <WorkspaceRouteFallback />}
       </div>
+      <AppStatusBar />
     </SidebarInset>
   );
 }
@@ -582,7 +701,7 @@ const WorkspacePaperRootView = memo(function WorkspacePaperRootView(props: {
     >
       <div
         ref={containerRef}
-        className="flex h-full min-h-0 min-w-full items-stretch gap-3 px-3 py-3"
+        className="flex h-full min-h-0 min-w-full items-stretch gap-0 px-0 py-0"
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onDragLeave={handleDragLeave}
@@ -792,7 +911,7 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
     <div
       ref={containerRef}
       className={cn(
-        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden",
+        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden px-3 py-3 gap-1",
         props.axis === "x" ? "flex-row" : "flex-col",
       )}
     >
@@ -812,10 +931,10 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
             <button
               type="button"
               className={cn(
-                "relative z-10 shrink-0 bg-border/80 transition hover:bg-foreground/40",
+                "group relative z-10 shrink-0 transition",
                 props.axis === "x"
-                  ? "h-full w-1 cursor-col-resize touch-none"
-                  : "h-1 w-full cursor-row-resize touch-none",
+                  ? "flex h-full w-3 cursor-col-resize items-center justify-center touch-none"
+                  : "flex h-3 w-full cursor-row-resize items-center justify-center touch-none",
               )}
               aria-label={
                 props.axis === "x" ? "Resize panes horizontally" : "Resize panes vertically"
@@ -828,10 +947,10 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
             >
               <span
                 className={cn(
-                  "pointer-events-none absolute rounded-full bg-background/90",
+                  "pointer-events-none absolute rounded-full bg-border/80 transition-colors group-hover:bg-foreground/40",
                   props.axis === "x"
-                    ? "top-1/2 left-1/2 h-10 w-px -translate-x-1/2 -translate-y-1/2"
-                    : "top-1/2 left-1/2 h-px w-10 -translate-x-1/2 -translate-y-1/2",
+                    ? "top-1/2 left-1/2 h-[calc(100%-0.75rem)] w-px -translate-x-1/2 -translate-y-1/2"
+                    : "top-1/2 left-1/2 h-px w-[calc(100%-0.75rem)] -translate-x-1/2 -translate-y-1/2",
                 )}
               />
             </button>
@@ -1417,7 +1536,7 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
       <section
         ref={windowElementRef}
         className={cn(
-          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-background",
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-transparent",
           focusedWindowId === props.windowId ? "ring-1 ring-border/80" : "",
         )}
         onDragLeave={isPaperLayout ? undefined : handleWindowDragLeave}
@@ -1434,7 +1553,9 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
             surface={activeSurface}
             bindSharedComposerHandle={focusedWindowId === props.windowId}
           />
-        ) : null}
+        ) : (
+          <WorkspaceWindowEmptyState windowId={props.windowId} />
+        )}
         {dragItem && isWindowDragActive && !isPaperLayout ? (
           <>
             <div className="pointer-events-none absolute inset-0 z-10 bg-background/10" />
