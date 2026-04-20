@@ -31,6 +31,7 @@ vi.mock("../primary", () => ({
     },
     environmentId: EnvironmentId.make("env-1"),
   })),
+  readPrimaryEnvironmentBinding: vi.fn(() => null),
 }));
 
 vi.mock("./catalog", () => ({
@@ -63,9 +64,13 @@ vi.mock("./connection", () => ({
   createEnvironmentConnection: mockCreateEnvironmentConnection,
 }));
 
-vi.mock("../../rpc/wsRpcClient", () => ({
-  createWsRpcClient: mockCreateWsRpcClient,
-}));
+vi.mock("@t3tools/client-runtime", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@t3tools/client-runtime")>();
+  return {
+    ...actual,
+    createWsRpcClient: mockCreateWsRpcClient,
+  };
+});
 
 vi.mock("../../rpc/wsTransport", () => ({
   WsTransport: MockWsTransport,
@@ -150,6 +155,12 @@ describe("retainThreadDetailSubscription", () => {
     mockCreateWsRpcClient.mockReturnValue({
       orchestration: {
         subscribeThread: mockSubscribeThread,
+      },
+      terminal: {
+        onMetadata: vi.fn(() => vi.fn()),
+      },
+      ports: {
+        onForwards: vi.fn(() => vi.fn()),
       },
     });
     mockCreateEnvironmentConnection.mockImplementation((input) => ({
