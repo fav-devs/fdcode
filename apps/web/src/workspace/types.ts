@@ -42,7 +42,8 @@ export type WorkspaceSurfaceInstance =
 
 export interface WorkspaceWindow {
   id: string;
-  surfaceId: string | null;
+  tabIds: string[];
+  activeTabId: string | null;
 }
 
 export interface WorkspacePlacementTarget {
