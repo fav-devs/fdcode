@@ -40,6 +40,7 @@ import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
 import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
 import { parsePortsRouteSearch, stripPortsSearchParams } from "../portsRouteSearch";
+import { parseFileRouteSearch, stripFileSearchParams } from "../fileRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -68,7 +69,11 @@ import {
   togglePendingUserInputOptionSelection,
   type PendingUserInputDraftAnswer,
 } from "../pendingUserInput";
-import { selectProjectsAcrossEnvironments, selectThreadsAcrossEnvironments, useStore } from "../store";
+import {
+  selectProjectsAcrossEnvironments,
+  selectThreadsAcrossEnvironments,
+  useStore,
+} from "../store";
 import { createProjectSelectorByRef, createThreadSelectorByRef } from "../storeSelectors";
 import { useUiStateStore } from "../uiStateStore";
 import {
@@ -184,6 +189,7 @@ import {
 import { sanitizeThreadErrorMessage } from "~/rpc/transportError";
 import { retainThreadDetailSubscription } from "../environments/runtime/service";
 import { RightPanelSheet } from "./RightPanelSheet";
+import { selectSingleChatPanelState, useSingleChatPanelStore } from "../singleChatPanelStore";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -332,6 +338,8 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       onPortsPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      /** Sidebar toggle lives in `WorkspaceShell` top chrome; hide duplicate in chat header. */
+      workspaceShellChrome?: boolean;
       routeKind: "server";
       draftId?: never;
     }
@@ -343,6 +351,7 @@ type ChatViewProps =
       onDiffPanelOpen?: () => void;
       onPortsPanelOpen?: () => void;
       reserveTitleBarControlInset?: boolean;
+      workspaceShellChrome?: boolean;
       routeKind: "draft";
       draftId: DraftId;
     };
@@ -606,6 +615,7 @@ export default function ChatView(props: ChatViewProps) {
     onDiffPanelOpen,
     onPortsPanelOpen,
     reserveTitleBarControlInset = true,
+    workspaceShellChrome = false,
   } = props;
   const draftId = routeKind === "draft" ? props.draftId : null;
   const routeThreadRef = useMemo(
@@ -634,6 +644,7 @@ export default function ChatView(props: ChatViewProps) {
     select: (params) => ({
       ...parseDiffRouteSearch(params),
       ...parsePortsRouteSearch(params),
+      ...parseFileRouteSearch(params),
     }),
   });
   const { resolvedTheme } = useTheme();
@@ -752,9 +763,8 @@ export default function ChatView(props: ChatViewProps) {
   // Also keep track of open terminal thread keys for PersistentThreadTerminalDrawer
   const openTerminalThreadKeys = useTerminalStateStore(
     useShallow((state) =>
-      Object.entries(state.terminalStateByThreadKey).flatMap(
-        ([nextThreadKey, nextTerminalState]) =>
-          nextTerminalState.terminalOpen ? [nextThreadKey] : [],
+      Object.entries(state.terminalStateByThreadKey).flatMap(([nextThreadKey, nextTerminalState]) =>
+        nextTerminalState.terminalOpen ? [nextThreadKey] : [],
       ),
     ),
   );
@@ -1516,58 +1526,48 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "terminal.close", terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   );
-  const diffPanelShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "diff.toggle", nonTerminalShortcutLabelOptions),
-    [keybindings, nonTerminalShortcutLabelOptions],
+  const currentThreadPanelKey = useMemo(
+    () => scopedThreadKey(scopeThreadRef(environmentId, threadId)),
+    [environmentId, threadId],
+  );
+  const threadPanelState = useSingleChatPanelStore(
+    useMemo(() => selectSingleChatPanelState(currentThreadPanelKey), [currentThreadPanelKey]),
   );
   const portsOpen = rawSearch.ports === "1";
-  const onToggleDiff = useCallback(() => {
-    if (!isServerThread) {
-      return;
-    }
-    if (!diffOpen) {
-      onDiffPanelOpen?.();
-    }
+  const filesOpen = rawSearch.files === "1";
+  const panelOpen = diffOpen || portsOpen || filesOpen;
+
+  const onTogglePanel = useCallback(() => {
+    if (!isServerThread) return;
+    const panelToOpen = threadPanelState.hasOpenedPanel ? threadPanelState.lastOpenPanel : "diff";
     void navigate({
       to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
+      params: { environmentId, threadId },
       replace: true,
       search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
-      },
-    });
-  }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
-  const onTogglePorts = useCallback(() => {
-    if (!isServerThread || !activeProject) {
-      return;
-    }
-    if (!portsOpen) {
-      onPortsPanelOpen?.();
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) => {
-        const rest = stripPortsSearchParams(previous);
-        return portsOpen ? { ...rest, ports: undefined } : { ...rest, ports: "1" };
+        if (panelOpen) {
+          return stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+        }
+        onDiffPanelOpen?.();
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+        if (panelToOpen === "files") {
+          return { ...rest, files: "1" as const };
+        }
+        if (panelToOpen === "ports") {
+          return { ...rest, ports: "1" as const };
+        }
+        return { ...rest, diff: "1" as const };
       },
     });
   }, [
-    activeProject,
     environmentId,
     isServerThread,
     navigate,
-    onPortsPanelOpen,
-    portsOpen,
+    onDiffPanelOpen,
+    panelOpen,
     threadId,
+    threadPanelState.hasOpenedPanel,
+    threadPanelState.lastOpenPanel,
   ]);
 
   const envLocked = Boolean(
@@ -2361,7 +2361,7 @@ export default function ChatView(props: ChatViewProps) {
       if (command === "diff.toggle") {
         event.preventDefault();
         event.stopPropagation();
-        onToggleDiff();
+        onTogglePanel();
         return;
       }
 
@@ -2386,7 +2386,7 @@ export default function ChatView(props: ChatViewProps) {
     runProjectScript,
     splitTerminal,
     keybindings,
-    onToggleDiff,
+    onTogglePanel,
     storeSetTerminalOpen,
     terminalDrawerOpen,
     toggleTerminalVisibility,
@@ -3319,17 +3319,13 @@ export default function ChatView(props: ChatViewProps) {
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalDrawerOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          portsOpen={portsOpen}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
           onRunProjectScript={runProjectScript}
           onAddProjectScript={saveProjectScript}
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
-          onTogglePorts={onTogglePorts}
+          showSidebarTrigger={!workspaceShellChrome}
         />
       </header>
 
@@ -3509,7 +3505,7 @@ export default function ChatView(props: ChatViewProps) {
                   storeSetTerminalHeight(routeThreadRef, height);
                 }}
                 keybindings={keybindings}
-              onAddTerminalContext={handleAddTerminalContext}
+                onAddTerminalContext={handleAddTerminalContext}
               />
             </div>
           ) : null}
@@ -3608,7 +3604,6 @@ export default function ChatView(props: ChatViewProps) {
           />
         </RightPanelSheet>
       ) : null}
-
 
       {expandedImage && (
         <ExpandedImageDialog preview={expandedImage} onClose={closeExpandedImage} />
