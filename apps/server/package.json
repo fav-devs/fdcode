@@ -8,6 +8,7 @@
     "directory": "apps/server"
   },
   "bin": {
+    "fd": "./dist/bin.mjs",
     "t3": "./dist/bin.mjs"
   },
   "files": [
@@ -15,7 +16,7 @@
   ],
   "type": "module",
   "scripts": {
-    "dev": "node --watch src/bin.ts",
+    "dev": "node --watch src/bin.ts start",
     "build": "node scripts/cli.ts build",
     "build:bundle": "tsdown",
     "start": "node dist/bin.mjs",

@@ -1077,6 +1077,39 @@ const forceFlag = Flag.boolean("force").pipe(
   Flag.withDefault(false),
 );
 
+const runDaemonStart = (
+  flags: CliServerFlags & {
+    readonly foreground?: boolean;
+    readonly json?: boolean;
+  },
+) =>
+  Effect.gen(function* () {
+    if (flags.foreground) {
+      return yield* runServerCommand(flags, {
+        startupPresentation: "headless",
+        forceAutoBootstrapProjectFromCwd: false,
+      });
+    }
+
+    const logLevel = yield* GlobalFlag.LogLevel;
+    const startup = yield* startDetachedDaemon(flags, logLevel);
+    const output = flags.json
+      ? JSON.stringify(startup, null, 2)
+      : startup.action === "already-running"
+        ? [
+            "Daemon already running.",
+            `PID: ${startup.pid ?? "-"}`,
+            `Origin: ${startup.origin ?? "-"}`,
+            `Logs: ${startup.logPath}`,
+          ].join("\n")
+        : [
+            `Daemon started in background (PID ${startup.pid ?? "unknown"}).`,
+            `Logs: ${startup.logPath}`,
+            `Tail logs with: tail -f ${startup.logPath}`,
+          ].join("\n");
+    yield* Console.log(output);
+  });
+
 const sessionRoleFlag = Flag.choice("role", ["owner", "client"]).pipe(
   Flag.withDescription("Role for the issued bearer session."),
   Flag.withDefault("owner"),
@@ -1440,34 +1473,7 @@ const daemonStartCommand = Command.make("start", {
   json: jsonFlag,
 }).pipe(
   Command.withDescription("Start the T3 daemon in the background by default."),
-  Command.withHandler((flags) =>
-    Effect.gen(function* () {
-      if (flags.foreground) {
-        return yield* runServerCommand(flags, {
-          startupPresentation: "headless",
-          forceAutoBootstrapProjectFromCwd: false,
-        });
-      }
-
-      const logLevel = yield* GlobalFlag.LogLevel;
-      const startup = yield* startDetachedDaemon(flags, logLevel);
-      const output = flags.json
-        ? JSON.stringify(startup, null, 2)
-        : startup.action === "already-running"
-          ? [
-              "Daemon already running.",
-              `PID: ${startup.pid ?? "-"}`,
-              `Origin: ${startup.origin ?? "-"}`,
-              `Logs: ${startup.logPath}`,
-            ].join("\n")
-          : [
-              `Daemon started in background (PID ${startup.pid ?? "unknown"}).`,
-              `Logs: ${startup.logPath}`,
-              `Tail logs with: tail -f ${startup.logPath}`,
-            ].join("\n");
-      yield* Console.log(output);
-    }),
-  ),
+  Command.withHandler((flags) => runDaemonStart(flags)),
 );
 
 const daemonStatusCommand = Command.make("status", {
@@ -1577,8 +1583,8 @@ const daemonCommand = Command.make("daemon").pipe(
 );
 
 export const cli = Command.make("t3", { ...sharedServerCommandFlags }).pipe(
-  Command.withDescription("Run the fd code server."),
-  Command.withHandler((flags) => runServerCommand(flags)),
+  Command.withDescription("Run the fd code server daemon by default."),
+  Command.withHandler((flags) => runDaemonStart(flags)),
   Command.withSubcommands([
     startCommand,
     serveCommand,
