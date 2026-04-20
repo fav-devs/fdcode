@@ -193,7 +193,7 @@ const makeDefaultOrchestrationThreadShell = (
   };
 };
 
-const workspaceAndProjectServicesLayer = Layer.mergeAll(
+const _workspaceAndProjectServicesLayer = Layer.mergeAll(
   WorkspacePathsLive,
   WorkspaceEntriesLive.pipe(Layer.provide(WorkspacePathsLive)),
   WorkspaceFileSystemLive.pipe(
@@ -1830,7 +1830,14 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assertTrue(result._tag === "Failure");
-      assertInclude(String(result.failure), "SocketOpenError");
+      const failureMessage = String(result.failure);
+      assertTrue(
+        failureMessage.includes("SocketOpenError") || failureMessage.includes("SocketCloseError"),
+      );
+      assertTrue(
+        failureMessage.includes("Unauthorized") ||
+          failureMessage.includes("An error occurred during Open"),
+      );
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

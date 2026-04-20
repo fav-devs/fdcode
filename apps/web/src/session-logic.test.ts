@@ -11,7 +11,6 @@ import {
   deriveCompletionDividerBeforeEntryId,
   deriveActiveWorkStartedAt,
   deriveActivePlanState,
-  PROVIDER_OPTIONS,
   derivePendingApprovals,
   derivePendingUserInputs,
   deriveTimelineEntries,
@@ -21,6 +20,7 @@ import {
   hasActionableProposedPlan,
   hasToolActivityForTurn,
   isLatestTurnSettled,
+  PROVIDER_OPTIONS,
 } from "./session-logic";
 
 function makeActivity(overrides: {
@@ -1398,8 +1398,8 @@ describe("PROVIDER_OPTIONS", () => {
       { value: "codex", label: "Codex", available: true },
       { value: "claudeAgent", label: "Claude", available: true },
       { value: "gemini", label: "Gemini", available: true },
-      { value: "opencode", label: "OpenCode", available: true },
-      { value: "cursor", label: "Cursor", available: true },
+      { value: "opencode", label: "OpenCode", available: true, pickerSidebarBadge: "new" },
+      { value: "cursor", label: "Cursor", available: true, pickerSidebarBadge: "new" },
     ]);
     expect(claude).toEqual({
       value: "claudeAgent",
@@ -1415,6 +1415,7 @@ describe("PROVIDER_OPTIONS", () => {
       value: "cursor",
       label: "Cursor",
       available: true,
+      pickerSidebarBadge: "new",
     });
   });
 });

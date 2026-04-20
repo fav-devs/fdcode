@@ -99,7 +99,7 @@ function resolveNamedOption(
       return matchingOption;
     }
   }
-  return options.find((option) => option.isDefault) ?? null;
+  return options.find((option) => option.isDefault) ?? options[0] ?? null;
 }
 
 function getRawContextWindow(
@@ -309,6 +309,12 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
     allowPromptInjectedEffort,
   });
   const defaultEffort = getDefaultEffort(caps);
+  const showsEffortSection = showEffort;
+  const showsThinkingSection = !showEffort && showThinking;
+  const showsFastModeSection = showFastMode;
+  const showsContextWindowSection = showContextWindow;
+  const hasSectionsBeforeAgent =
+    showsEffortSection || showsThinkingSection || showsFastModeSection || showsContextWindowSection;
 
   const handleEffortChange = useCallback(
     (value: string) => {
@@ -369,7 +375,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
 
   return (
     <>
-      {showEffort ? (
+      {showsEffortSection ? (
         <>
           <MenuGroup>
             <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
@@ -399,7 +405,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
             </MenuRadioGroup>
           </MenuGroup>
         </>
-      ) : showThinking ? (
+      ) : showsThinkingSection ? (
         <MenuGroup>
           <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Thinking</div>
           <MenuRadioGroup
@@ -415,9 +421,9 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           </MenuRadioGroup>
         </MenuGroup>
       ) : null}
-      {showFastMode ? (
+      {showsFastModeSection ? (
         <>
-          {showEffort || showThinking ? <MenuDivider /> : null}
+          {showsEffortSection || showsThinkingSection ? <MenuDivider /> : null}
           <MenuGroup>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Fast Mode</div>
             <MenuRadioGroup
@@ -434,9 +440,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
           </MenuGroup>
         </>
       ) : null}
-      {showContextWindow ? (
+      {showsContextWindowSection ? (
         <>
-          {showEffort || showThinking || showFastMode ? <MenuDivider /> : null}
+          {showsEffortSection || showsThinkingSection || showsFastModeSection ? (
+            <MenuDivider />
+          ) : null}
           <MenuGroup>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">
               Context Window
@@ -463,7 +471,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
       ) : null}
       {agentOptions.length > 0 ? (
         <>
-          <MenuDivider />
+          {hasSectionsBeforeAgent ? <MenuDivider /> : null}
           <MenuGroup>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Agent</div>
             <MenuRadioGroup

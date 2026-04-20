@@ -17,6 +17,7 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "./providerModels";
+import { type ModelEsque } from "./components/chat/providerIconUtils";
 import { formatAppModelOptionName } from "./providerModelNames";
 
 const MAX_CUSTOM_MODEL_COUNT = 32;
@@ -33,6 +34,8 @@ export type ProviderCustomModelConfig = {
 export interface AppModelOption {
   slug: string;
   name: string;
+  shortName?: string;
+  subProvider?: string;
   isCustom: boolean;
 }
 
@@ -120,9 +123,11 @@ export function getAppModelOptions(
   selectedModel?: string | null,
 ): AppModelOption[] {
   const options: AppModelOption[] = getProviderModels(providers, provider).map(
-    ({ slug, name, isCustom }) => ({
+    ({ slug, name, shortName, subProvider, isCustom }) => ({
       slug,
       name,
+      ...(shortName ? { shortName } : {}),
+      ...(subProvider ? { subProvider } : {}),
       isCustom,
     }),
   );
@@ -186,7 +191,7 @@ export function getCustomModelOptionsByProvider(
   providers: ReadonlyArray<ServerProvider>,
   selectedProvider?: ProviderKind | null,
   selectedModel?: string | null,
-): Record<ProviderKind, ReadonlyArray<{ slug: string; name: string }>> {
+): Record<ProviderKind, ReadonlyArray<ModelEsque>> {
   return {
     codex: getAppModelOptions(
       settings,
