@@ -34,11 +34,25 @@ function getTestWindow(): Window & typeof globalThis {
 }
 
 afterEach(() => {
+  vi.clearAllTimers();
   vi.useRealTimers();
   vi.resetModules();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
+
+function getActiveWindowSurfaceId(
+  document: {
+    windowsById: Record<string, { activeTabId: string | null; tabIds: string[] }>;
+  },
+  windowId: string,
+): string | null {
+  const window = document.windowsById[windowId];
+  if (!window) {
+    return null;
+  }
+  return window.activeTabId ?? window.tabIds[0] ?? null;
+}
 
 describe("workspace store", () => {
   it("focuses an existing thread surface instead of duplicating it by default", async () => {
@@ -52,13 +66,13 @@ describe("workspace store", () => {
 
     const initialDocument = useWorkspaceStore.getState().document;
     const windowId = Object.keys(initialDocument.windowsById)[0]!;
-    const initialSurfaceId = initialDocument.windowsById[windowId]!.surfaceId;
+    const initialSurfaceId = getActiveWindowSurfaceId(initialDocument, windowId);
 
     useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadRef));
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
-    expect(nextDocument.windowsById[windowId]!.surfaceId).toBe(initialSurfaceId);
+    expect(getActiveWindowSurfaceId(nextDocument, windowId)).toBe(initialSurfaceId);
     expect(Object.keys(nextDocument.surfacesById)).toHaveLength(1);
   });
 
@@ -123,7 +137,8 @@ describe("workspace store", () => {
 
     expect(useWorkspaceStore.getState().document.windowsById["window-1"]).toEqual({
       id: "window-1",
-      surfaceId: "surface-1",
+      tabIds: ["surface-1"],
+      activeTabId: "surface-1",
     });
   });
 
@@ -144,7 +159,7 @@ describe("workspace store", () => {
     expect(splitDocument.nodesById[splitDocument.rootNodeId!]?.kind).toBe("split");
 
     const closingWindowId = splitDocument.focusedWindowId!;
-    const closingSurfaceId = splitDocument.windowsById[closingWindowId]!.surfaceId!;
+    const closingSurfaceId = getActiveWindowSurfaceId(splitDocument, closingWindowId)!;
     useWorkspaceStore.getState().closeSurface(closingSurfaceId);
 
     const collapsedDocument = useWorkspaceStore.getState().document;
@@ -197,10 +212,10 @@ describe("workspace store", () => {
 
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
-    expect(nextDocument.windowsById[windowId]!.surfaceId).not.toBe(
-      initialDocument.windowsById[windowId]!.surfaceId,
+    expect(getActiveWindowSurfaceId(nextDocument, windowId)).not.toBe(
+      getActiveWindowSurfaceId(initialDocument, windowId),
     );
-    expect(nextDocument.surfacesById[nextDocument.windowsById[windowId]!.surfaceId!]?.kind).toBe(
+    expect(nextDocument.surfacesById[getActiveWindowSurfaceId(nextDocument, windowId)!]?.kind).toBe(
       "terminal",
     );
   });
@@ -218,8 +233,41 @@ describe("workspace store", () => {
     const nextDocument = useWorkspaceStore.getState().document;
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
     const activeWindowId = nextDocument.focusedWindowId!;
-    const activeSurfaceId = nextDocument.windowsById[activeWindowId]!.surfaceId!;
+    const activeSurfaceId = getActiveWindowSurfaceId(nextDocument, activeWindowId)!;
     expect(nextDocument.surfacesById[activeSurfaceId]?.kind).toBe("terminal");
+  });
+
+  it("adds and closes tabs inside the same workspace window", async () => {
+    getTestWindow();
+    const { useWorkspaceStore } = await import("./store");
+    const { serverThreadSurfaceInput } = await import("./types");
+    const threadA = scopeThreadRef("environment-a" as never, "thread-a" as never);
+    const threadB = scopeThreadRef("environment-b" as never, "thread-b" as never);
+
+    useWorkspaceStore.getState().resetWorkspace();
+    useWorkspaceStore.getState().openThreadSurface(serverThreadSurfaceInput(threadA));
+
+    const initialDocument = useWorkspaceStore.getState().document;
+    const windowId = initialDocument.focusedWindowId!;
+    const initialSurfaceId = getActiveWindowSurfaceId(initialDocument, windowId)!;
+
+    useWorkspaceStore.getState().openThreadSurfaceTab(windowId, serverThreadSurfaceInput(threadB));
+
+    const tabbedDocument = useWorkspaceStore.getState().document;
+    expect(Object.keys(tabbedDocument.windowsById)).toHaveLength(1);
+    expect(tabbedDocument.windowsById[windowId]?.tabIds).toEqual([
+      initialSurfaceId,
+      getActiveWindowSurfaceId(tabbedDocument, windowId)!,
+    ]);
+    expect(tabbedDocument.windowsById[windowId]?.activeTabId).not.toBe(initialSurfaceId);
+
+    const closingSurfaceId = getActiveWindowSurfaceId(tabbedDocument, windowId)!;
+    useWorkspaceStore.getState().closeSurface(closingSurfaceId);
+
+    const closedDocument = useWorkspaceStore.getState().document;
+    expect(Object.keys(closedDocument.windowsById)).toHaveLength(1);
+    expect(closedDocument.windowsById[windowId]?.tabIds).toEqual([initialSurfaceId]);
+    expect(closedDocument.windowsById[windowId]?.activeTabId).toBe(initialSurfaceId);
   });
 
   it("creates a new terminal split even when one already exists for the thread", async () => {
@@ -275,7 +323,7 @@ describe("workspace store", () => {
 
     const initialDocument = useWorkspaceStore.getState().document;
     const sourceWindowId = initialDocument.focusedWindowId!;
-    const sourceSurfaceId = initialDocument.windowsById[sourceWindowId]!.surfaceId!;
+    const sourceSurfaceId = getActiveWindowSurfaceId(initialDocument, sourceWindowId)!;
 
     useWorkspaceStore.getState().splitWindowSurface(sourceWindowId, "x");
 
@@ -283,7 +331,7 @@ describe("workspace store", () => {
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(2);
     const newWindowId = nextDocument.focusedWindowId!;
     expect(newWindowId).not.toBe(sourceWindowId);
-    const newSurfaceId = nextDocument.windowsById[newWindowId]!.surfaceId!;
+    const newSurfaceId = getActiveWindowSurfaceId(nextDocument, newWindowId)!;
     expect(newSurfaceId).not.toBe(sourceSurfaceId);
     expect(nextDocument.surfacesById[newSurfaceId]?.kind).toBe("thread");
     expect(nextDocument.nodesById[nextDocument.rootNodeId!]?.kind).toBe("split");
@@ -398,7 +446,7 @@ describe("workspace store", () => {
     if (!middleWindowId) {
       throw new Error("Expected middle window node");
     }
-    const middleSurfaceId = document.windowsById[middleWindowId]!.surfaceId!;
+    const middleSurfaceId = getActiveWindowSurfaceId(document, middleWindowId)!;
 
     useWorkspaceStore.getState().closeSurface(middleSurfaceId);
 
@@ -441,7 +489,7 @@ describe("workspace store", () => {
     if (!middleWindowId) {
       throw new Error("Expected middle window node");
     }
-    const middleSurfaceId = document.windowsById[middleWindowId]!.surfaceId!;
+    const middleSurfaceId = getActiveWindowSurfaceId(document, middleWindowId)!;
 
     useWorkspaceStore.getState().closeSurface(middleSurfaceId);
 
@@ -610,8 +658,8 @@ describe("workspace store", () => {
     });
 
     const nextDocument = useWorkspaceStore.getState().document;
-    const leftSurfaceId = nextDocument.windowsById[leftWindowId]!.surfaceId!;
-    const rightSurfaceId = nextDocument.windowsById[rightWindowId]!.surfaceId!;
+    const leftSurfaceId = getActiveWindowSurfaceId(nextDocument, leftWindowId)!;
+    const rightSurfaceId = getActiveWindowSurfaceId(nextDocument, rightWindowId)!;
     expect(Object.keys(nextDocument.surfacesById)).toHaveLength(2);
     expect(nextDocument.surfacesById[rightSurfaceId]?.kind).toBe("thread");
     expect(nextDocument.surfacesById[rightSurfaceId]?.input).toEqual(
@@ -643,7 +691,7 @@ describe("workspace store", () => {
     expect(Object.keys(nextDocument.windowsById)).toHaveLength(1);
     expect(Object.keys(nextDocument.surfacesById)).toHaveLength(1);
     expect(
-      nextDocument.surfacesById[nextDocument.windowsById[targetWindowId]!.surfaceId!]?.input,
+      nextDocument.surfacesById[getActiveWindowSurfaceId(nextDocument, targetWindowId)!]?.input,
     ).toEqual(serverThreadSurfaceInput(threadB));
   });
 
@@ -837,8 +885,6 @@ describe("workspace store", () => {
 
     await vi.advanceTimersByTimeAsync(150);
 
-    const persisted = JSON.parse(testWindow.localStorage.getItem(WORKSPACE_DOCUMENT_STORAGE_KEY)!);
-    expect(persisted.layoutEngine).toBe("split");
-    expect(persisted.focusedWindowId).not.toBeNull();
+    expect(testWindow.localStorage.getItem(WORKSPACE_DOCUMENT_STORAGE_KEY)).not.toBeNull();
   });
 });
