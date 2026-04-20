@@ -34,7 +34,7 @@ import {
   ProviderAdapterValidationError,
 } from "../Errors.ts";
 import { CopilotAdapter, type CopilotAdapterShape } from "../Services/CopilotAdapter.ts";
-import { createCopilotClient } from "../copilotRuntime.ts";
+import { createCopilotClient, trimOrUndefined } from "../copilotRuntime.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
 
 const PROVIDER = "copilot" as const;
@@ -143,11 +143,6 @@ const EMPTY_USER_INPUT_RESPONSE = {
 
 function nowIso(): string {
   return new Date().toISOString();
-}
-
-function trimToUndefined(value: string | null | undefined): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
 }
 
 function parseCopilotResumeCursor(raw: unknown): { sessionId: string } | undefined {
@@ -304,21 +299,21 @@ function mapPermissionRequestType(
 function permissionDetail(request: SessionPermissionRequest): string | undefined {
   switch (request.kind) {
     case "shell":
-      return trimToUndefined(request.fullCommandText) ?? trimToUndefined(request.intention);
+      return trimOrUndefined(request.fullCommandText) ?? trimOrUndefined(request.intention);
     case "write":
-      return trimToUndefined(request.fileName) ?? trimToUndefined(request.intention);
+      return trimOrUndefined(request.fileName) ?? trimOrUndefined(request.intention);
     case "read":
-      return trimToUndefined(request.path) ?? trimToUndefined(request.intention);
+      return trimOrUndefined(request.path) ?? trimOrUndefined(request.intention);
     case "mcp":
-      return trimToUndefined(request.toolTitle) ?? `${request.serverName}:${request.toolName}`;
+      return trimOrUndefined(request.toolTitle) ?? `${request.serverName}:${request.toolName}`;
     case "url":
-      return trimToUndefined(request.url) ?? trimToUndefined(request.intention);
+      return trimOrUndefined(request.url) ?? trimOrUndefined(request.intention);
     case "memory":
-      return trimToUndefined(request.subject);
+      return trimOrUndefined(request.subject);
     case "custom-tool":
-      return trimToUndefined(request.toolName) ?? trimToUndefined(request.toolDescription);
+      return trimOrUndefined(request.toolName) ?? trimOrUndefined(request.toolDescription);
     case "hook":
-      return trimToUndefined(request.hookMessage) ?? trimToUndefined(request.toolName);
+      return trimOrUndefined(request.hookMessage) ?? trimOrUndefined(request.toolName);
     default:
       return undefined;
   }
@@ -1153,7 +1148,7 @@ export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
           case "session.start": {
             updateProviderSession(context, {
               status: "ready",
-              model: trimToUndefined(event.data.selectedModel) ?? context.session.model,
+              model: trimOrUndefined(event.data.selectedModel) ?? context.session.model,
               ...(event.data.context?.cwd ? { cwd: event.data.context.cwd } : {}),
               resumeCursor: toCopilotResumeCursor(event.data.sessionId),
             });
@@ -1208,7 +1203,7 @@ export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
           case "session.resume": {
             updateProviderSession(context, {
               status: "ready",
-              model: trimToUndefined(event.data.selectedModel) ?? context.session.model,
+              model: trimOrUndefined(event.data.selectedModel) ?? context.session.model,
               ...(event.data.context?.cwd ? { cwd: event.data.context.cwd } : {}),
               resumeCursor: toCopilotResumeCursor(context.sdkSession.sessionId),
             });
@@ -1261,7 +1256,7 @@ export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
             return;
           }
           case "session.error": {
-            const message = trimToUndefined(event.data.message) ?? "Copilot session failed.";
+            const message = trimOrUndefined(event.data.message) ?? "Copilot session failed.";
             updateProviderSession(context, {
               status: "error",
               lastError: message,
@@ -1357,7 +1352,7 @@ export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
           }
           case "session.model_change": {
             updateProviderSession(context, {
-              model: trimToUndefined(event.data.newModel) ?? context.session.model,
+              model: trimOrUndefined(event.data.newModel) ?? context.session.model,
             });
             await emitAsync({
               ...createBaseEvent({
@@ -1732,9 +1727,9 @@ export function makeCopilotAdapterLive(options?: CopilotAdapterLiveOptions) {
             const itemId = `copilot-tool-${event.data.toolCallId}`;
             const toolMeta = context.toolMetaById.get(event.data.toolCallId);
             const detail =
-              trimToUndefined(event.data.result?.detailedContent) ??
-              trimToUndefined(event.data.result?.content) ??
-              trimToUndefined(event.data.error?.message);
+              trimOrUndefined(event.data.result?.detailedContent) ??
+              trimOrUndefined(event.data.result?.content) ??
+              trimOrUndefined(event.data.error?.message);
             await emitAsync({
               ...createBaseEvent({
                 threadId: context.threadId,
