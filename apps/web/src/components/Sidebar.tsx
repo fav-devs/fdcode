@@ -557,7 +557,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [threadKey, togglePinnedThread],
   );
-  const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
+  const rowButtonRender = useMemo(() => <button type="button" />, []);
 
   return (
     <SidebarMenuSubItem
@@ -3020,14 +3020,14 @@ const SidebarChatsSection = memo(function SidebarChatsSection({
 
       <div
         className={cn(
-          "grid pt-1 transition-[grid-template-rows,opacity] duration-200 ease-out",
+          "grid pt-1 transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
           expanded ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0",
         )}
       >
         <div className="min-h-0 overflow-hidden">
           <SidebarMenu
             className={cn(
-              "gap-1 transition-transform duration-200 ease-out",
+              "gap-1 transition-transform duration-200 ease-out motion-reduce:transition-none",
               expanded ? "translate-y-0" : "-translate-y-1 pointer-events-none",
             )}
           >
