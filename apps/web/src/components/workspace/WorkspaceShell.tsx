@@ -1,14 +1,32 @@
-import { useParams } from "@tanstack/react-router";
-import { Columns2Icon, Rows2Icon, TerminalSquareIcon, XIcon } from "lucide-react";
+import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
+import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "../../types";
+import {
+  Columns2Icon,
+  MessageSquarePlusIcon,
+  PanelRightIcon,
+  Rows2Icon,
+  TerminalSquareIcon,
+  XIcon,
+} from "lucide-react";
 import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { createThreadSelectorByRef } from "../../storeSelectors";
-import { useStore } from "../../store";
-import { cn } from "../../lib/utils";
+import { selectProjectsAcrossEnvironments, useStore } from "../../store";
+import { cn, newDraftId, newThreadId } from "../../lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { SidebarInset } from "../ui/sidebar";
+import { SidebarHeaderTrigger, SidebarInset } from "../ui/sidebar";
 import ChatView from "../ChatView";
 import { useComposerDraftStore } from "../../composerDraftStore";
-import { resolveThreadRouteTarget } from "../../threadRoutes";
+import { parseDiffRouteSearch, stripDiffSearchParams } from "../../diffRouteSearch";
+import { parseFileRouteSearch, stripFileSearchParams } from "../../fileRouteSearch";
+import { parsePortsRouteSearch, stripPortsSearchParams } from "../../portsRouteSearch";
+import {
+  createDefaultSingleChatPanelState,
+  useSingleChatPanelStore,
+} from "../../singleChatPanelStore";
+import { buildThreadRouteParams, resolveThreadRouteTarget } from "../../threadRoutes";
+import { deriveLogicalProjectKeyFromSettings } from "../../logicalProject";
 import { ThreadTerminalSurface } from "./ThreadTerminalSurface";
 import { useWorkspaceDragStore } from "../../workspace/dragStore";
 import {
@@ -17,10 +35,11 @@ import {
   useWorkspaceMobileActiveWindowId,
   useWorkspaceNode,
   useWorkspaceRootNodeId,
+  useWorkspaceWindowActiveSurface,
   useWorkspaceStore,
-  useWorkspaceSurface,
   useWorkspaceWindow,
   useWorkspaceWindowIds,
+  useWorkspaceWindowSurfaces,
   useWorkspaceZoomedWindowId,
 } from "../../workspace/store";
 import {
@@ -31,6 +50,7 @@ import {
   type WorkspacePlacementTarget,
   type WorkspaceSurfaceInstance,
 } from "../../workspace/types";
+import { useSettings } from "~/hooks/useSettings";
 
 const WORKSPACE_MIN_PANE_SIZE_PX = 220;
 const WORKSPACE_DROP_EDGE_THRESHOLD = 0.22;
@@ -185,7 +205,7 @@ export function WorkspaceShell() {
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
-      <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
         {rootNodeId ? <WorkspaceLayoutRoot /> : <WorkspaceRouteFallback />}
       </div>
     </SidebarInset>
@@ -243,6 +263,7 @@ function WorkspaceRouteFallback() {
         environmentId={routeTarget.threadRef.environmentId}
         threadId={routeTarget.threadRef.threadId}
         routeKind="server"
+        workspaceShellChrome
       />
     );
   }
@@ -257,6 +278,7 @@ function WorkspaceRouteFallback() {
       environmentId={draftSession.environmentId}
       threadId={draftSession.threadId}
       routeKind="draft"
+      workspaceShellChrome
     />
   );
 }
@@ -553,7 +575,11 @@ const WorkspacePaperRootView = memo(function WorkspacePaperRootView(props: {
   }, []);
 
   return (
-    <div ref={scrollContainerRef} data-paper-scroll className="h-full min-h-0 overflow-x-auto overflow-y-hidden">
+    <div
+      ref={scrollContainerRef}
+      data-paper-scroll
+      className="h-full min-h-0 overflow-x-auto overflow-y-hidden"
+    >
       <div
         ref={containerRef}
         className="flex h-full min-h-0 min-w-full items-stretch gap-3 px-3 py-3"
@@ -816,6 +842,150 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
   );
 });
 
+function useWorkspaceWindowTabActions(
+  windowId: string,
+  activeSurface: WorkspaceSurfaceInstance | null,
+) {
+  const openThreadSurfaceTab = useWorkspaceStore((state) => state.openThreadSurfaceTab);
+  const openTerminalSurfaceTabForThread = useWorkspaceStore(
+    (state) => state.openTerminalSurfaceTabForThread,
+  );
+  const projects = useStore(useShallow((store) => selectProjectsAcrossEnvironments(store)));
+  const projectGroupingSettings = useSettings((settings) => ({
+    sidebarProjectGroupingMode: settings.sidebarProjectGroupingMode,
+    sidebarProjectGroupingOverrides: settings.sidebarProjectGroupingOverrides,
+  }));
+
+  const activeServerThreadRef =
+    activeSurface?.kind === "terminal"
+      ? activeSurface.input.threadRef
+      : activeSurface?.kind === "thread" && activeSurface.input.scope === "server"
+        ? activeSurface.input.threadRef
+        : null;
+  const activeServerThread = useStore(
+    useMemo(() => createThreadSelectorByRef(activeServerThreadRef), [activeServerThreadRef]),
+  );
+  const activeDraftSession = useComposerDraftStore((store) =>
+    activeSurface?.kind === "thread" && activeSurface.input.scope === "draft"
+      ? store.getDraftSession(activeSurface.input.draftId)
+      : null,
+  );
+
+  const chatProjectContext = useMemo(() => {
+    if (activeDraftSession) {
+      return {
+        environmentId: activeDraftSession.environmentId,
+        projectId: activeDraftSession.projectId,
+        branch: activeDraftSession.branch,
+        worktreePath: activeDraftSession.worktreePath,
+        envMode: activeDraftSession.envMode,
+      };
+    }
+
+    if (activeServerThread) {
+      return {
+        environmentId: activeServerThread.environmentId,
+        projectId: activeServerThread.projectId,
+        branch: activeServerThread.branch,
+        worktreePath: activeServerThread.worktreePath,
+        envMode: activeServerThread.worktreePath ? "worktree" : "local",
+      } as const;
+    }
+
+    const fallbackProject = projects[0];
+    if (!fallbackProject) {
+      return null;
+    }
+
+    return {
+      environmentId: fallbackProject.environmentId,
+      projectId: fallbackProject.id,
+      branch: null,
+      worktreePath: null,
+      envMode: "local",
+    } as const;
+  }, [activeDraftSession, activeServerThread, projects]);
+
+  const terminalThreadRef = useMemo(() => {
+    if (activeSurface?.kind === "terminal") {
+      return activeSurface.input.threadRef;
+    }
+
+    if (activeSurface?.kind === "thread" && activeSurface.input.scope === "server") {
+      return activeSurface.input.threadRef;
+    }
+
+    if (activeDraftSession) {
+      return scopeThreadRef(activeDraftSession.environmentId, activeDraftSession.threadId);
+    }
+
+    return null;
+  }, [activeDraftSession, activeSurface]);
+
+  const openNewChatTab = useCallback(() => {
+    if (!chatProjectContext) {
+      return;
+    }
+
+    const projectRef = scopeProjectRef(
+      chatProjectContext.environmentId,
+      chatProjectContext.projectId,
+    );
+    const project = projects.find(
+      (candidate) =>
+        candidate.environmentId === chatProjectContext.environmentId &&
+        candidate.id === chatProjectContext.projectId,
+    );
+    const logicalProjectKey = project
+      ? deriveLogicalProjectKeyFromSettings(project, projectGroupingSettings)
+      : `${chatProjectContext.environmentId}:${chatProjectContext.projectId}`;
+    const draftId = newDraftId();
+    const threadId = newThreadId();
+
+    useComposerDraftStore
+      .getState()
+      .setLogicalProjectDraftThreadId(logicalProjectKey, projectRef, draftId, {
+        threadId,
+        createdAt: new Date().toISOString(),
+        branch: chatProjectContext.branch,
+        worktreePath: chatProjectContext.worktreePath,
+        envMode: chatProjectContext.envMode,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_INTERACTION_MODE,
+      });
+    useComposerDraftStore.getState().setDraftThreadContext(draftId, {
+      projectRef,
+      branch: chatProjectContext.branch,
+      worktreePath: chatProjectContext.worktreePath,
+      envMode: chatProjectContext.envMode,
+      runtimeMode: DEFAULT_RUNTIME_MODE,
+      interactionMode: DEFAULT_INTERACTION_MODE,
+    });
+    useComposerDraftStore.getState().applyStickyState(draftId);
+    openThreadSurfaceTab(windowId, {
+      scope: "draft",
+      draftId,
+      environmentId: chatProjectContext.environmentId,
+      threadId,
+    });
+  }, [chatProjectContext, openThreadSurfaceTab, projectGroupingSettings, projects, windowId]);
+
+  const openNewTerminalTab = useCallback(() => {
+    if (!terminalThreadRef) {
+      return;
+    }
+
+    openTerminalSurfaceTabForThread(windowId, terminalThreadRef);
+  }, [openTerminalSurfaceTabForThread, terminalThreadRef, windowId]);
+
+  return {
+    canOpenNewChatTab: chatProjectContext !== null,
+    canOpenNewTerminalTab: terminalThreadRef !== null,
+    openNewChatTab,
+    openNewTerminalTab,
+  };
+}
+
 const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
   scrollIntoViewOnFocus?: boolean;
   windowId: string;
@@ -825,13 +995,47 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
   const dragItem = useWorkspaceDragStore((state) => state.item);
   const clearDragItem = useWorkspaceDragStore((state) => state.clearItem);
   const focusWindow = useWorkspaceStore((state) => state.focusWindow);
+  const focusSurface = useWorkspaceStore((state) => state.focusSurface);
   const closeSurface = useWorkspaceStore((state) => state.closeSurface);
   const placeSurface = useWorkspaceStore((state) => state.placeSurface);
   const placeThreadSurface = useWorkspaceStore((state) => state.placeThreadSurface);
   const splitWindowSurface = useWorkspaceStore((state) => state.splitWindowSurface);
+  const navigate = useNavigate();
+  const routeTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const routePanelSearch = useSearch({
+    strict: false,
+    select: (search) => ({
+      ...parseDiffRouteSearch(search),
+      ...parseFileRouteSearch(search),
+      ...parsePortsRouteSearch(search),
+    }),
+  });
   const window = useWorkspaceWindow(props.windowId);
-  const activeSurface = useWorkspaceSurface(window?.surfaceId ?? null);
+  const tabSurfaces = useWorkspaceWindowSurfaces(props.windowId);
+  const activeSurface = useWorkspaceWindowActiveSurface(props.windowId);
   const focusedWindowId = useWorkspaceFocusedWindowId();
+  const { canOpenNewChatTab, canOpenNewTerminalTab, openNewChatTab, openNewTerminalTab } =
+    useWorkspaceWindowTabActions(props.windowId, activeSurface);
+  const activeServerThreadRef =
+    activeSurface?.kind === "thread" && activeSurface.input.scope === "server"
+      ? activeSurface.input.threadRef
+      : activeSurface?.kind === "terminal"
+        ? activeSurface.input.threadRef
+        : null;
+  const panelToggleAvailable = activeServerThreadRef !== null;
+  const panelOpen =
+    panelToggleAvailable &&
+    routeTarget?.kind === "server" &&
+    activeServerThreadRef !== null &&
+    routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
+    routeTarget.threadRef.threadId === activeServerThreadRef.threadId &&
+    (routePanelSearch.diff === "1" ||
+      routePanelSearch.files === "1" ||
+      routePanelSearch.ports === "1");
+  const isFocusedPane = focusedWindowId === props.windowId;
   const [isWindowDragActive, setIsWindowDragActive] = useState(false);
   const [threadActivationFocusRequestId, setThreadActivationFocusRequestId] = useState(0);
   const [terminalActivationFocusRequestId, setTerminalActivationFocusRequestId] = useState(0);
@@ -1016,17 +1220,48 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
     setHoveredDropTarget(null);
   }, []);
 
+  const handleToggleRightPanel = useCallback(() => {
+    if (!activeServerThreadRef) {
+      return;
+    }
+
+    const threadKey = scopedThreadKey(activeServerThreadRef);
+    const persisted = useSingleChatPanelStore.getState().panelStateByThreadKey[threadKey];
+    const panelState = persisted ?? createDefaultSingleChatPanelState();
+    const panelToOpen = panelState.hasOpenedPanel ? panelState.lastOpenPanel : "diff";
+
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(activeServerThreadRef),
+      search: (previous) => {
+        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+        const isCurrentRouteThread =
+          routeTarget?.kind === "server" &&
+          routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
+          routeTarget.threadRef.threadId === activeServerThreadRef.threadId;
+
+        if (isCurrentRouteThread && panelOpen) {
+          return rest;
+        }
+
+        if (panelToOpen === "files") {
+          return { ...rest, files: "1" as const };
+        }
+        if (panelToOpen === "ports") {
+          return { ...rest, ports: "1" as const };
+        }
+        return { ...rest, diff: "1" as const };
+      },
+    });
+  }, [activeServerThreadRef, navigate, panelOpen, routeTarget]);
+
   if (!window) {
     return null;
   }
 
   return (
-    <section
-      ref={windowElementRef}
-      className={cn(
-        "relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden border border-border/70 bg-background",
-        focusedWindowId === props.windowId ? "ring-1 ring-border/80" : "",
-      )}
+    <div
+      className="flex h-full min-h-0 min-w-0 flex-1 flex-col gap-0.5 overflow-hidden"
       onPointerDownCapture={(event) => {
         if (event.button !== 0) {
           shouldAutoFocusOnActivationRef.current = true;
@@ -1058,10 +1293,13 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
         }
       }}
     >
-      <div className="flex min-w-0 items-center gap-1 border-b border-border/70 bg-muted/20 px-2 py-1.5">
+      <div className="flex min-w-0 shrink-0 items-center gap-2 px-2 py-0.5">
+        {isFocusedPane ? (
+          <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
+        ) : null}
         <div
           className={cn(
-            "flex min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 py-1 text-xs transition",
+            "flex min-h-0 min-w-0 flex-1 items-center gap-1 overflow-x-auto rounded-md px-1 text-xs transition",
             isWorkspaceDropTarget(hoveredDropTarget, "center") ? "bg-accent/60" : "",
           )}
           data-pane-autofocus-allow="true"
@@ -1073,21 +1311,92 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
             placement: "center",
           })}
         >
-          <button
-            type="button"
-            className="min-w-0 flex-1 truncate text-left text-foreground"
-            draggable={activeSurface !== null}
-            onClick={() => focusWindow(props.windowId)}
-            onDragEnd={handlePaneDragEnd}
-            onDragStart={activeSurface ? handlePaneDragStart(activeSurface.id) : undefined}
-          >
-            {activeSurface ? <WorkspaceSurfaceTitle surface={activeSurface} /> : "Empty pane"}
-          </button>
+          {tabSurfaces.length > 0 ? (
+            <>
+              {tabSurfaces.map((surface) => {
+                const isActive = surface.id === activeSurface?.id;
+                return (
+                  <div
+                    key={surface.id}
+                    className={cn(
+                      "group flex min-h-8 min-w-0 max-w-64 items-center gap-1 rounded-md border px-2.5 py-2 transition",
+                      isActive
+                        ? "border-border bg-background text-foreground shadow-sm"
+                        : "border-transparent bg-background/40 text-muted-foreground hover:bg-background/70 hover:text-foreground",
+                    )}
+                  >
+                    <button
+                      type="button"
+                      className="min-h-0 min-w-0 flex-1 truncate py-0.5 text-left leading-tight"
+                      draggable
+                      onClick={() => focusSurface(surface.id)}
+                      onDragEnd={handlePaneDragEnd}
+                      onDragStart={handlePaneDragStart(surface.id)}
+                    >
+                      <WorkspaceSurfaceTitle surface={surface} />
+                    </button>
+                    <button
+                      type="button"
+                      className="rounded-sm p-0.5 opacity-70 transition hover:bg-accent hover:text-foreground group-hover:opacity-100"
+                      aria-label="Close tab"
+                      title="Close tab"
+                      onClick={() => closeSurface(surface.id)}
+                    >
+                      <XIcon className="size-3" />
+                    </button>
+                  </div>
+                );
+              })}
+            </>
+          ) : (
+            <button
+              type="button"
+              className="min-h-8 min-w-0 flex-1 truncate rounded-md px-2.5 py-2 text-left text-foreground"
+              onClick={() => focusWindow(props.windowId)}
+            >
+              Empty pane
+            </button>
+          )}
         </div>
-        <div className="hidden items-center gap-1 md:flex">
+        {isFocusedPane && panelToggleAvailable ? (
           <button
             type="button"
-            className="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            className={cn(
+              "inline-flex size-8 shrink-0 items-center justify-center rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur transition hover:bg-accent hover:text-foreground",
+              panelOpen && "border-border bg-accent text-accent-foreground hover:bg-accent/90",
+            )}
+            onClick={handleToggleRightPanel}
+            aria-label="Toggle right sidebar"
+            title="Toggle right sidebar"
+          >
+            <PanelRightIcon className="size-3.5" />
+          </button>
+        ) : null}
+        {/* Match ChatHeader right actions: rounded pill, border, frosted background */}
+        <div className="hidden min-w-0 shrink-0 items-center justify-end gap-2 rounded-2xl border border-border/60 bg-background/68 px-2 py-1 shadow-sm backdrop-blur md:flex">
+          <button
+            type="button"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+            onClick={openNewChatTab}
+            aria-label="Open a new chat tab"
+            title="Open a new chat tab"
+            disabled={!canOpenNewChatTab}
+          >
+            <MessageSquarePlusIcon className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground disabled:opacity-40"
+            onClick={openNewTerminalTab}
+            aria-label="Open a new terminal tab"
+            title="Open a new terminal tab"
+            disabled={!canOpenNewTerminalTab}
+          >
+            <TerminalSquareIcon className="size-3.5" />
+          </button>
+          <button
+            type="button"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
             onClick={() => splitWindowSurface(props.windowId, "x")}
             aria-label="Split pane right"
             title="Split pane right"
@@ -1096,7 +1405,7 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
           </button>
           <button
             type="button"
-            className="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
+            className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-accent hover:text-foreground"
             onClick={() => splitWindowSurface(props.windowId, "y")}
             aria-label="Split pane down"
             title="Split pane down"
@@ -1104,26 +1413,13 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
             <Rows2Icon className="size-3.5" />
           </button>
         </div>
-        {activeSurface ? (
-          <button
-            type="button"
-            className="rounded-sm p-1 text-muted-foreground transition hover:bg-accent hover:text-foreground"
-            onClick={() => closeSurface(activeSurface.id)}
-            aria-label="Close pane"
-            title="Close pane"
-          >
-            <XIcon className="size-3.5" />
-          </button>
-        ) : null}
       </div>
-      <div
+      <section
+        ref={windowElementRef}
         className={cn(
-          "h-0.5 shrink-0 transition-colors",
-          focusedWindowId === props.windowId ? "bg-primary" : "bg-transparent",
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-background",
+          focusedWindowId === props.windowId ? "ring-1 ring-border/80" : "",
         )}
-      />
-      <div
-        className="relative flex h-full min-h-0 min-w-0 flex-1 overflow-hidden"
         onDragLeave={isPaperLayout ? undefined : handleWindowDragLeave}
         onDrop={isPaperLayout ? undefined : handleWindowDrop}
         onDragOver={isPaperLayout ? undefined : handleWindowDragOver}
@@ -1150,8 +1446,8 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
             />
           </>
         ) : null}
-      </div>
-    </section>
+      </section>
+    </div>
   );
 });
 
@@ -1170,6 +1466,7 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
           environmentId={props.surface.input.threadRef.environmentId}
           threadId={props.surface.input.threadRef.threadId}
           routeKind="server"
+          workspaceShellChrome
           {...(props.bindSharedComposerHandle === undefined
             ? {}
             : { bindSharedComposerHandle: props.bindSharedComposerHandle })}
@@ -1186,6 +1483,7 @@ const WorkspaceSurfaceView = memo(function WorkspaceSurfaceView(props: {
         environmentId={props.surface.input.environmentId}
         threadId={props.surface.input.threadId}
         routeKind="draft"
+        workspaceShellChrome
         {...(props.bindSharedComposerHandle === undefined
           ? {}
           : { bindSharedComposerHandle: props.bindSharedComposerHandle })}
