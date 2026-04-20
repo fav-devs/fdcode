@@ -911,7 +911,7 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
     <div
       ref={containerRef}
       className={cn(
-        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden px-3 py-3 gap-1",
+        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden px-3 py-3 gap-0",
         props.axis === "x" ? "flex-row" : "flex-col",
       )}
     >
