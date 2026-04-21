@@ -1,5 +1,10 @@
 import type { ReactNode } from "react";
-import { PanelRightCloseIcon } from "lucide-react";
+import {
+  FolderTreeIcon,
+  GitCompareArrowsIcon,
+  ListTreeIcon,
+  PanelRightCloseIcon,
+} from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { type TimestampFormat } from "@t3tools/contracts/settings";
 
@@ -26,47 +31,93 @@ interface ThreadRightPanelProps {
   workspaceRoot?: string | undefined;
   timestampFormat: TimestampFormat;
   onClose: () => void;
+  onSelectPanel?: (panel: ThreadRightPanelKind) => void;
 }
 
-function ThreadPanelFrame(props: {
-  title: string;
-  mode: "sheet" | "sidebar";
+function RightPanelTabs(props: {
+  activePanel: ThreadRightPanelKind;
+  planLabel: string;
   onClose: () => void;
-  children: ReactNode;
+  onSelectPanel?: ((panel: ThreadRightPanelKind) => void) | undefined;
 }) {
+  const tabs: Array<{
+    icon: ReactNode;
+    key: ThreadRightPanelKind;
+    label: string;
+  }> = [
+    {
+      key: "diff",
+      label: "Diff",
+      icon: <GitCompareArrowsIcon className="size-3.5" />,
+    },
+    {
+      key: "files",
+      label: "Files",
+      icon: <FolderTreeIcon className="size-3.5" />,
+    },
+    {
+      key: "ports",
+      label: "Ports",
+      icon: <ListTreeIcon className="size-3.5" />,
+    },
+    {
+      key: "plan",
+      label: props.planLabel,
+      icon: <ListTreeIcon className="size-3.5" />,
+    },
+  ];
+
+  return (
+    <div className="flex h-11 shrink-0 items-center gap-2 border-border/60 border-b px-3">
+      <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto">
+        {tabs.map((tab) => (
+          <button
+            key={tab.key}
+            type="button"
+            title={tab.label}
+            className={cn(
+              "inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition",
+              props.activePanel === tab.key
+                ? "border-border bg-accent text-accent-foreground"
+                : "border-transparent text-muted-foreground hover:bg-accent/60 hover:text-foreground",
+            )}
+            onClick={() => props.onSelectPanel?.(tab.key)}
+          >
+            {tab.icon}
+          </button>
+        ))}
+      </div>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        onClick={props.onClose}
+        aria-label="Close right panel"
+        className="text-muted-foreground/50 hover:text-foreground/70"
+      >
+        <PanelRightCloseIcon className="size-3.5" />
+      </Button>
+    </div>
+  );
+}
+
+function ThreadPanelFrame(props: { mode: "sheet" | "sidebar"; children: ReactNode }) {
   return (
     <div
       className={cn(
         "flex min-h-0 flex-col bg-card/50",
-        props.mode === "sidebar"
-          ? "h-full w-[min(42vw,820px)] min-w-[360px] max-w-[560px] shrink-0 border-l border-border/70"
-          : "h-full w-full",
+        props.mode === "sidebar" ? "h-full w-full" : "h-full w-full",
       )}
     >
-      <div className="flex h-12 shrink-0 items-center justify-between border-b border-border/60 px-3">
-        <h2 className="font-medium text-sm text-foreground">{props.title}</h2>
-        <Button
-          size="icon-xs"
-          variant="ghost"
-          onClick={props.onClose}
-          aria-label={`Close ${props.title.toLowerCase()} sidebar`}
-          className="text-muted-foreground/50 hover:text-foreground/70"
-        >
-          <PanelRightCloseIcon className="size-3.5" />
-        </Button>
-      </div>
       <div className="min-h-0 flex-1">{props.children}</div>
     </div>
   );
 }
 
 export function ThreadRightPanel(props: ThreadRightPanelProps) {
-  if (props.panel === "diff") {
-    return <DiffPanel mode={props.mode} />;
-  }
-
-  if (props.panel === "plan") {
-    return (
+  const content =
+    props.panel === "diff" ? (
+      <DiffPanel mode={props.mode} />
+    ) : props.panel === "plan" ? (
       <PlanSidebar
         activePlan={props.activePlan}
         activeProposedPlan={props.activeProposedPlan}
@@ -78,20 +129,25 @@ export function ThreadRightPanel(props: ThreadRightPanelProps) {
         mode={props.mode}
         onClose={props.onClose}
       />
-    );
-  }
-
-  if (props.panel === "files") {
-    return (
-      <ThreadPanelFrame title="Files" mode={props.mode} onClose={props.onClose}>
+    ) : props.panel === "files" ? (
+      <ThreadPanelFrame mode={props.mode}>
         <FilePanel />
       </ThreadPanelFrame>
+    ) : (
+      <ThreadPanelFrame mode={props.mode}>
+        <PortsPanel environmentId={props.environmentId} cwd={props.portsCwd ?? null} />
+      </ThreadPanelFrame>
     );
-  }
 
   return (
-    <ThreadPanelFrame title="Ports" mode={props.mode} onClose={props.onClose}>
-      <PortsPanel environmentId={props.environmentId} cwd={props.portsCwd ?? null} />
-    </ThreadPanelFrame>
+    <div className="flex h-full min-h-0 flex-col">
+      <RightPanelTabs
+        activePanel={props.panel}
+        planLabel={props.planLabel}
+        onClose={props.onClose}
+        onSelectPanel={props.onSelectPanel}
+      />
+      <div className="min-h-0 flex-1">{content}</div>
+    </div>
   );
 }
