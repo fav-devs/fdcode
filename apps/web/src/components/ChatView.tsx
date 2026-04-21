@@ -1537,6 +1537,32 @@ export default function ChatView(props: ChatViewProps) {
           : null;
   const panelOpen = diffOpen || portsOpen || filesOpen || planOpen;
 
+  const openRightPanel = useCallback(
+    (panelToOpen: ThreadRightPanelKind) => {
+      if (!isServerThread) return;
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: { environmentId, threadId },
+        replace: true,
+        search: (previous: Record<string, unknown>) => {
+          const rest = stripThreadPanelSearchParams(previous);
+          if (panelToOpen === "files") {
+            return { ...rest, files: "1" as const };
+          }
+          if (panelToOpen === "ports") {
+            return { ...rest, ports: "1" as const };
+          }
+          if (panelToOpen === "plan") {
+            return { ...rest, plan: "1" as const };
+          }
+          onDiffPanelOpen?.();
+          return { ...rest, diff: "1" as const };
+        },
+      });
+    },
+    [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
+  );
+
   const onTogglePanel = useCallback(() => {
     if (!isServerThread) return;
     const panelToOpen = threadPanelState.hasOpenedPanel ? threadPanelState.lastOpenPanel : "diff";
@@ -1548,7 +1574,6 @@ export default function ChatView(props: ChatViewProps) {
         if (panelOpen) {
           return stripThreadPanelSearchParams(previous);
         }
-        onDiffPanelOpen?.();
         const rest = stripThreadPanelSearchParams(previous);
         if (panelToOpen === "files") {
           return { ...rest, files: "1" as const };
@@ -1559,6 +1584,7 @@ export default function ChatView(props: ChatViewProps) {
         if (panelToOpen === "plan") {
           return { ...rest, plan: "1" as const };
         }
+        onDiffPanelOpen?.();
         return { ...rest, diff: "1" as const };
       },
     });
@@ -3384,7 +3410,7 @@ export default function ChatView(props: ChatViewProps) {
       <header
         className={cn(
           "px-4 sm:px-6",
-          isElectron
+          isElectron && !workspaceShellChrome
             ? cn(
                 "drag-region flex h-[50px] items-center wco:h-[env(titlebar-area-height)]",
                 reserveTitleBarControlInset &&
@@ -3663,6 +3689,7 @@ export default function ChatView(props: ChatViewProps) {
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             onClose={activeRightPanel === "plan" ? closePlanSidebar : onTogglePanel}
+            onSelectPanel={openRightPanel}
           />
         ) : null}
       </div>
@@ -3702,6 +3729,7 @@ export default function ChatView(props: ChatViewProps) {
             workspaceRoot={activeWorkspaceRoot}
             timestampFormat={timestampFormat}
             onClose={activeRightPanel === "plan" ? closePlanSidebar : onTogglePanel}
+            onSelectPanel={openRightPanel}
           />
         </RightPanelSheet>
       ) : null}
