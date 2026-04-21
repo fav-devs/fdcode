@@ -116,7 +116,7 @@ export const AppStatusBar = memo(function AppStatusBar() {
   const isConnected = !!welcome;
 
   return (
-    <div className="flex h-7 shrink-0 items-center justify-between gap-2 px-3 sm:px-4 md:px-5 text-[11px]">
+    <div className="flex h-7 shrink-0 items-center justify-between gap-0 px-0 sm:px-4 md:px-5 text-[11px] mt-1">
       {/* Left section — connection + workspace */}
       <div className="flex min-w-0 -translate-y-px items-center gap-2 rounded-2xl border border-border/60 bg-background/68 px-2 py-0.5 shadow-sm backdrop-blur">
         <ConnectionPill
