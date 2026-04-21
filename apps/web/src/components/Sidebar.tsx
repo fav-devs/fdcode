@@ -1251,7 +1251,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [pinnedThreadKeys, projectThreads, threadDismissedStatusKeys, threadLastVisitedAts, threadSortOrder]);
+  }, [
+    pinnedThreadKeys,
+    projectThreads,
+    threadDismissedStatusKeys,
+    threadLastVisitedAts,
+    threadSortOrder,
+  ]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -2057,7 +2063,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             label: pinnedThreadKeySet.has(threadKey) ? "Unpin thread" : "Pin thread",
           },
           ...(threadStatus?.dismissible
-            ? ([{ id: "clear-notification", label: "Clear notification" }] satisfies ContextMenuItem[])
+            ? ([
+                { id: "clear-notification", label: "Clear notification" },
+              ] satisfies ContextMenuItem[])
             : []),
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },

@@ -158,7 +158,14 @@ layer("ProviderAdapterRegistryLive", (it) => {
       assert.equal(cursor, fakeCursorAdapter);
 
       const providers = yield* registry.listProviders();
-      assert.deepEqual(providers, ["codex", "copilot", "claudeAgent", "gemini", "opencode", "cursor"]);
+      assert.deepEqual(providers, [
+        "codex",
+        "copilot",
+        "claudeAgent",
+        "gemini",
+        "opencode",
+        "cursor",
+      ]);
     }),
   );
 

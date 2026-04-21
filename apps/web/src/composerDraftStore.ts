@@ -820,7 +820,14 @@ function legacyToModelSelectionByProvider(
   const result: Partial<Record<ProviderKind, ModelSelection>> = {};
   // Add entries from the options bag (for non-active providers)
   if (modelOptions) {
-    for (const provider of ["codex", "copilot", "claudeAgent", "gemini", "cursor", "opencode"] as const) {
+    for (const provider of [
+      "codex",
+      "copilot",
+      "claudeAgent",
+      "gemini",
+      "cursor",
+      "opencode",
+    ] as const) {
       const options = modelOptions[provider];
       if (options && Object.keys(options).length > 0) {
         result[provider] = createModelSelection(
