@@ -4,12 +4,22 @@ import type { Dirent } from "node:fs";
 
 import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import type {
+  FilesystemBrowseInput,
+  ProjectEntry,
+  ProjectFileSystemEntry,
+  ProjectListDirectoriesInput,
+  ProjectListDirectoriesResult,
+  ProjectLocalSearchEntry,
+  ProjectSearchLocalEntriesInput,
+  ProjectSearchLocalEntriesResult,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
+  scoreSubsequenceMatch,
   type RankedSearchResult,
 } from "@t3tools/shared/searchRanking";
 
@@ -497,10 +507,165 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const LOCAL_SEARCH_MAX_DEPTH = 6;
+  const LOCAL_SEARCH_DEFAULT_LIMIT = 50;
+  const LOCAL_SEARCH_TIME_BUDGET_MS = 600;
+  const LOCAL_SEARCH_READDIR_CONCURRENCY = 16;
+
+  const LOCAL_SEARCH_IGNORED_DIRECTORY_NAMES = new Set([
+    ".git",
+    "node_modules",
+    ".next",
+    ".turbo",
+    ".cache",
+    "dist",
+    "build",
+    "out",
+    ".convex",
+  ]);
+
+  function scoreLocalName(name: string, query: string): number {
+    const lower = name.toLowerCase();
+    const q = query.toLowerCase();
+    if (lower === q) return 0;
+    if (lower.startsWith(q)) return 2;
+    if (lower.includes(q)) return 5;
+    const fuzzy = scoreSubsequenceMatch(lower, q);
+    return fuzzy !== null ? 100 + fuzzy : Infinity;
+  }
+
+  const searchLocalEntries = Effect.fn("WorkspaceEntries.searchLocal")(
+    (input: ProjectSearchLocalEntriesInput) =>
+      Effect.tryPromise(async (): Promise<ProjectSearchLocalEntriesResult> => {
+        const { rootPath, query, limit = LOCAL_SEARCH_DEFAULT_LIMIT, includeFiles = false } = input;
+        const q = query.trim();
+        if (q.length === 0) return { entries: [], truncated: false };
+
+        const scored: Array<{ score: number; entry: ProjectLocalSearchEntry }> = [];
+        const deadline = Date.now() + LOCAL_SEARCH_TIME_BUDGET_MS;
+        let truncated = false;
+
+        const processDir = async (dirPath: string, depth: number): Promise<void> => {
+          if (Date.now() > deadline) {
+            truncated = true;
+            return;
+          }
+          let dirents: Dirent[];
+          try {
+            dirents = await fsPromises.readdir(dirPath, { withFileTypes: true });
+          } catch {
+            return;
+          }
+
+          // Fan-out sub-dirs up to concurrency limit
+          const subDirs: Array<[string, number]> = [];
+          for (const dirent of dirents) {
+            const isDir = dirent.isDirectory();
+            if (isDir && LOCAL_SEARCH_IGNORED_DIRECTORY_NAMES.has(dirent.name)) continue;
+            const entryPath = `${dirPath}/${dirent.name}`;
+            const parentPath = dirPath;
+
+            const score = scoreLocalName(dirent.name, q);
+            if (score !== Infinity && (isDir || includeFiles)) {
+              const entry: ProjectLocalSearchEntry = {
+                path: entryPath,
+                name: dirent.name,
+                parentPath,
+                kind: isDir ? "directory" : "file",
+              };
+              scored.push({ score, entry });
+            }
+
+            if (isDir && depth < LOCAL_SEARCH_MAX_DEPTH) {
+              subDirs.push([entryPath, depth + 1]);
+            }
+          }
+
+          // Batch sub-dir processing with concurrency cap
+          for (let i = 0; i < subDirs.length; i += LOCAL_SEARCH_READDIR_CONCURRENCY) {
+            const batch = subDirs.slice(i, i + LOCAL_SEARCH_READDIR_CONCURRENCY);
+            await Promise.all(batch.map(([p, d]) => processDir(p, d)));
+          }
+        };
+
+        await processDir(rootPath, 0);
+
+        scored.sort(
+          (left, right) =>
+            left.score - right.score || left.entry.path.localeCompare(right.entry.path),
+        );
+        const entries = scored.slice(0, limit).map((candidate) => candidate.entry);
+        if (scored.length > limit) {
+          truncated = true;
+        }
+
+        return {
+          entries,
+          truncated,
+        };
+      }).pipe(Effect.orDie),
+  );
+
+  const listDirectoriesImpl = Effect.fn("WorkspaceEntries.listDirectories")(
+    (input: ProjectListDirectoriesInput) =>
+      Effect.tryPromise(async (): Promise<ProjectListDirectoriesResult> => {
+        const relativePath = input.relativePath?.trim() ?? "";
+        const targetDir = relativePath ? path.resolve(input.cwd, relativePath) : input.cwd;
+        const dirents = await fsPromises.readdir(targetDir, { withFileTypes: true });
+
+        const filtered = dirents
+          .filter(
+            (d) =>
+              d.name.length > 0 &&
+              d.name !== "." &&
+              d.name !== ".." &&
+              d.name !== ".git" &&
+              (d.isDirectory() || (input.includeFiles === true && d.isFile())),
+          )
+          .sort((a, b) => {
+            if (a.isDirectory() !== b.isDirectory()) return a.isDirectory() ? -1 : 1;
+            return a.name.localeCompare(b.name);
+          });
+
+        const entries: ProjectFileSystemEntry[] = await Promise.all(
+          filtered.map(async (d) => {
+            const childRel = relativePath ? toPosixPath(`${relativePath}/${d.name}`) : d.name;
+            if (d.isDirectory()) {
+              const childAbs = path.join(input.cwd, childRel);
+              let hasChildren = false;
+              try {
+                const childDirents = await fsPromises.readdir(childAbs, { withFileTypes: true });
+                hasChildren = childDirents.some((cd) => cd.isDirectory());
+              } catch {
+                // ignore
+              }
+              return {
+                path: childRel,
+                name: d.name,
+                kind: "directory" as const,
+                ...(relativePath ? { parentPath: relativePath } : {}),
+                hasChildren,
+              };
+            }
+            return {
+              path: childRel,
+              name: d.name,
+              kind: "file" as const,
+              ...(relativePath ? { parentPath: relativePath } : {}),
+            };
+          }),
+        );
+
+        return { entries };
+      }).pipe(Effect.orDie),
+  );
+
   return {
     browse,
     invalidate,
     search,
+    searchLocal: searchLocalEntries,
+    listDirectories: listDirectoriesImpl,
   } satisfies WorkspaceEntriesShape;
 });
 

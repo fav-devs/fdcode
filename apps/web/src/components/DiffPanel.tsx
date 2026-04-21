@@ -348,9 +348,9 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-      search: (previous) => {
+      search: (previous: Record<string, unknown>) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1", diffTurnId: turnId };
+        return { ...rest, diff: "1" as const, diffTurnId: turnId };
       },
     });
   };
@@ -359,9 +359,9 @@ export default function DiffPanel({ mode = "inline" }: DiffPanelProps) {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(scopeThreadRef(activeThread.environmentId, activeThread.id)),
-      search: (previous) => {
+      search: (previous: Record<string, unknown>) => {
         const rest = stripDiffSearchParams(previous);
-        return { ...rest, diff: "1" };
+        return { ...rest, diff: "1" as const };
       },
     });
   };

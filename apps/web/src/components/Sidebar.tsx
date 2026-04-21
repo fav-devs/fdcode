@@ -589,7 +589,9 @@ function AgentCommandStatusDialog({
                       {url.port != null && !existingForward ? (
                         <button
                           type="button"
-                          onClick={() => void forwardPort(url.port as number, agentCommandUrlLabel(url))}
+                          onClick={() =>
+                            void forwardPort(url.port as number, agentCommandUrlLabel(url))
+                          }
                           disabled={isForwardingThis}
                           aria-label={`Forward port ${url.port}`}
                           title={`Forward port ${url.port} for remote access`}

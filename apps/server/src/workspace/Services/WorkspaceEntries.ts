@@ -12,8 +12,12 @@ import type { Effect } from "effect";
 import type {
   FilesystemBrowseInput,
   FilesystemBrowseResult,
+  ProjectListDirectoriesInput,
+  ProjectListDirectoriesResult,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSearchLocalEntriesInput,
+  ProjectSearchLocalEntriesResult,
 } from "@t3tools/contracts";
 
 export class WorkspaceEntriesError extends Schema.TaggedErrorClass<WorkspaceEntriesError>()(
@@ -61,6 +65,21 @@ export interface WorkspaceEntriesShape {
    * Drop any cached workspace entries for the given workspace root.
    */
   readonly invalidate: (cwd: string) => Effect.Effect<void>;
+
+  /**
+   * Search the local filesystem recursively for entries matching the query.
+   * Does not require a workspace root — searches from an arbitrary rootPath.
+   */
+  readonly searchLocal: (
+    input: ProjectSearchLocalEntriesInput,
+  ) => Effect.Effect<ProjectSearchLocalEntriesResult>;
+
+  /**
+   * List the immediate children of a directory (lazy one-level listing).
+   */
+  readonly listDirectories: (
+    input: ProjectListDirectoriesInput,
+  ) => Effect.Effect<ProjectListDirectoriesResult>;
 }
 
 /**

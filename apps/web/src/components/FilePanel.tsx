@@ -481,9 +481,9 @@ export default function FilePanel() {
       void navigate({
         to: "/$environmentId/$threadId",
         params: buildThreadRouteParams(routeThreadRef),
-        search: (previous) => {
+        search: (previous: Record<string, unknown>) => {
           const rest = stripFileSearchParams(previous);
-          return { ...rest, files: "1", filesPath: entry.path };
+          return { ...rest, files: "1" as const, filesPath: entry.path };
         },
       });
     },

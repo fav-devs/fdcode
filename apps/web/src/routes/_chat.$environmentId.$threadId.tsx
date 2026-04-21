@@ -2,12 +2,10 @@ import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
 
+import { parseThreadRouteSearch, type ThreadRouteSearch } from "../chatPanelRouteSearch";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from "../composerDraftStore";
-import { parseDiffRouteSearch } from "../diffRouteSearch";
-import { parseFileRouteSearch } from "../fileRouteSearch";
-import { parsePortsRouteSearch } from "../portsRouteSearch";
-import { resolveRoutePanelState, type ThreadRouteSearch } from "./-chatThreadRoute.logic";
+import { resolveRoutePanelState } from "./-chatThreadRoute.logic";
 import { useSingleChatPanelStore } from "../singleChatPanelStore";
 import { selectEnvironmentState, selectThreadExistsByRef, useStore } from "../store";
 import { createThreadSelectorByRef } from "../storeSelectors";
@@ -91,10 +89,6 @@ function ChatThreadRouteView() {
 }
 
 export const Route = createFileRoute("/_chat/$environmentId/$threadId")({
-  validateSearch: (search): ThreadRouteSearch => ({
-    ...parseDiffRouteSearch(search),
-    ...parseFileRouteSearch(search),
-    ...parsePortsRouteSearch(search),
-  }),
+  validateSearch: (search): ThreadRouteSearch => parseThreadRouteSearch(search),
   component: ChatThreadRouteView,
 });

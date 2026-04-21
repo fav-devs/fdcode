@@ -567,7 +567,12 @@ export function clearThreadUi(state: UiState, threadId: string): UiState {
   const hasDismissedStatus = threadId in state.threadDismissedStatusKeyById;
   const hasChangedFilesState = threadId in state.threadChangedFilesExpandedById;
   const hasDismissedAgentCommandState = threadId in state.dismissedAgentCommandStatusByThreadKey;
-  if (!hasVisitedState && !hasDismissedStatus && !hasChangedFilesState && !hasDismissedAgentCommandState) {
+  if (
+    !hasVisitedState &&
+    !hasDismissedStatus &&
+    !hasChangedFilesState &&
+    !hasDismissedAgentCommandState
+  ) {
     return state;
   }
   const nextThreadLastVisitedAtById = { ...state.threadLastVisitedAtById };

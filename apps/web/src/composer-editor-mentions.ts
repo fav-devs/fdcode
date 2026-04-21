@@ -2,6 +2,10 @@ import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
 } from "./lib/terminalContext";
+import {
+  createComposerMentionTokenRegex,
+  extractComposerMentionPath,
+} from "~/lib/composerMentions";
 
 export type ComposerPromptSegment =
   | {
@@ -21,7 +25,10 @@ export type ComposerPromptSegment =
       context: TerminalContextDraft | null;
     };
 
-const MENTION_TOKEN_REGEX = /(^|\s)@([^\s@]+)(?=\s)/g;
+const MENTION_TOKEN_REGEX = createComposerMentionTokenRegex({
+  includeTrailingTokenAtEnd: false,
+  global: true,
+});
 const SKILL_TOKEN_REGEX = /(^|\s)\$([a-zA-Z][a-zA-Z0-9:_-]*)(?=\s)/g;
 
 function rangeIncludesIndex(start: number, end: number, index: number): boolean {
@@ -58,7 +65,7 @@ function collectInlineTokenMatches(text: string): InlineTokenMatch[] {
   for (const match of text.matchAll(MENTION_TOKEN_REGEX)) {
     const fullMatch = match[0];
     const prefix = match[1] ?? "";
-    const path = match[2] ?? "";
+    const path = extractComposerMentionPath(match);
     const matchIndex = match.index ?? 0;
     const start = matchIndex + prefix.length;
     const end = start + fullMatch.length - prefix.length;
