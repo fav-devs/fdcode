@@ -1,60 +1,62 @@
-import type { OpenCodeSettings, ServerProvider } from "@t3tools/contracts";
-import { Cause, Effect, Equal, Layer, Stream } from "effect";
+import type {
+  ModelCapabilities,
+  OpenCodeSettings,
+  ServerProvider,
+  ServerProviderModel,
+} from "@t3tools/contracts";
+import { Cause, Data, Effect, Equal, Layer, Stream } from "effect";
 
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import {
   buildServerProvider,
-  isCommandMissingCause,
+  nonEmptyTrimmed,
   parseGenericCliVersion,
   providerModelsFromSettings,
 } from "../providerSnapshot.ts";
 import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
 import {
-  connectToOpenCodeServer,
-  DEFAULT_OPENCODE_MODEL_CAPABILITIES,
-  createOpenCodeSdkClient,
-  flattenOpenCodeModels,
+  OpenCodeRuntime,
+  openCodeRuntimeErrorDetail,
   getOpenCodeManagedProviderDescriptor,
-  loadOpenCodeInventory,
-  runOpenCodeCommand,
+  type OpenCodeInventory,
 } from "../opencodeRuntime.ts";
 import { resolveOpenCodeManagedUsageLimits } from "../openCodeUsageLimits.ts";
 import { makeUnavailableUsageLimits } from "../providerUsageLimits.ts";
+import type { Agent, ProviderListResponse } from "@opencode-ai/sdk/v2";
 
 const PROVIDER = "opencode" as const;
 
-class OpenCodeProbePromiseError extends Error {
-  override readonly cause: unknown;
+class OpenCodeProbeError extends Data.TaggedError("OpenCodeProbeError")<{
+  readonly cause: unknown;
+  readonly detail: string;
+}> {}
 
-  constructor(cause: unknown) {
-    super(cause instanceof Error ? cause.message : String(cause));
-    this.cause = cause;
-    this.name = "OpenCodeProbePromiseError";
+function normalizeProbeMessage(message: string): string | undefined {
+  const trimmed = message.trim();
+  if (trimmed.length === 0) {
+    return undefined;
   }
-}
-
-function toOpenCodeProbeError(cause: unknown): OpenCodeProbePromiseError {
-  return new OpenCodeProbePromiseError(cause);
+  if (
+    trimmed === "An error occurred in Effect.tryPromise" ||
+    trimmed === "An error occurred in Effect.try"
+  ) {
+    return undefined;
+  }
+  return trimmed;
 }
 
 function normalizedErrorMessage(cause: unknown): string | undefined {
+  if (cause instanceof OpenCodeProbeError) {
+    return normalizeProbeMessage(cause.detail);
+  }
+
   if (!(cause instanceof Error)) {
     return undefined;
   }
 
-  const message = cause.message.trim();
-  if (message.length === 0) {
-    return undefined;
-  }
-  if (
-    message === "An error occurred in Effect.tryPromise" ||
-    message === "An error occurred in Effect.try"
-  ) {
-    return undefined;
-  }
-  return message;
+  return normalizeProbeMessage(cause.message);
 }
 
 function formatOpenCodeProbeError(input: {
@@ -62,8 +64,8 @@ function formatOpenCodeProbeError(input: {
   readonly isExternalServer: boolean;
   readonly serverUrl: string;
 }): { readonly installed: boolean; readonly message: string } {
-  const lower = input.cause instanceof Error ? input.cause.message.toLowerCase() : "";
   const detail = normalizedErrorMessage(input.cause);
+  const lower = detail?.toLowerCase() ?? "";
 
   if (input.isExternalServer) {
     if (
@@ -99,7 +101,7 @@ function formatOpenCodeProbeError(input: {
     };
   }
 
-  if (input.cause instanceof Error && isCommandMissingCause(input.cause)) {
+  if (lower.includes("enoent") || lower.includes("notfound")) {
     return {
       installed: false,
       message: "OpenCode CLI (`opencode`) is not installed or not on PATH.",
@@ -130,6 +132,105 @@ function formatOpenCodeProbeError(input: {
   };
 }
 
+function titleCaseSlug(value: string): string {
+  return value
+    .split(/[-_/]+/)
+    .filter((segment) => segment.length > 0)
+    .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+    .join(" ");
+}
+
+function inferDefaultVariant(
+  providerID: string,
+  variants: ReadonlyArray<string>,
+): string | undefined {
+  if (variants.length === 1) {
+    return variants[0];
+  }
+  if (providerID === "anthropic" || providerID.startsWith("google")) {
+    return variants.includes("high") ? "high" : undefined;
+  }
+  if (providerID === "openai" || providerID === "opencode") {
+    return variants.includes("medium") ? "medium" : variants.includes("high") ? "high" : undefined;
+  }
+  return undefined;
+}
+
+function inferDefaultAgent(agents: ReadonlyArray<Agent>): string | undefined {
+  return agents.find((agent) => agent.name === "build")?.name ?? agents[0]?.name ?? undefined;
+}
+
+const DEFAULT_OPENCODE_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+function openCodeCapabilitiesForModel(input: {
+  readonly providerID: string;
+  readonly model: ProviderListResponse["all"][number]["models"][string];
+  readonly agents: ReadonlyArray<Agent>;
+}): ModelCapabilities {
+  const variantValues = Object.keys(input.model.variants ?? {});
+  const defaultVariant = inferDefaultVariant(input.providerID, variantValues);
+  const variantOptions: ModelCapabilities["variantOptions"] = variantValues.map((value) =>
+    Object.assign(
+      { value, label: titleCaseSlug(value) },
+      defaultVariant === value ? { isDefault: true } : {},
+    ),
+  );
+  const primaryAgents = input.agents.filter(
+    (agent) => !agent.hidden && (agent.mode === "primary" || agent.mode === "all"),
+  );
+  const defaultAgent = inferDefaultAgent(primaryAgents);
+  const agentOptions: ModelCapabilities["agentOptions"] = primaryAgents.map((agent) =>
+    Object.assign(
+      { value: agent.name, label: titleCaseSlug(agent.name) },
+      defaultAgent === agent.name ? { isDefault: true } : {},
+    ),
+  );
+  return {
+    ...DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+    ...(variantOptions.length > 0 ? { variantOptions } : {}),
+    ...(agentOptions.length > 0 ? { agentOptions } : {}),
+  };
+}
+
+function flattenOpenCodeModels(input: OpenCodeInventory): ReadonlyArray<ServerProviderModel> {
+  const connected = new Set(input.providerList.connected);
+  const models: Array<ServerProviderModel> = [];
+
+  for (const provider of input.providerList.all) {
+    if (!connected.has(provider.id)) {
+      continue;
+    }
+
+    for (const model of Object.values(provider.models)) {
+      const name = nonEmptyTrimmed(model.name);
+      if (!name) {
+        continue;
+      }
+
+      const subProvider = nonEmptyTrimmed(provider.name);
+      models.push({
+        slug: `${provider.id}/${model.id}`,
+        name,
+        ...(subProvider ? { subProvider } : {}),
+        isCustom: false,
+        capabilities: openCodeCapabilitiesForModel({
+          providerID: provider.id,
+          model,
+          agents: input.agents,
+        }),
+      });
+    }
+  }
+
+  return models.toSorted((left, right) => left.name.localeCompare(right.name));
+}
+
 const makePendingOpenCodeProvider = (openCodeSettings: OpenCodeSettings): ServerProvider => {
   const checkedAt = new Date().toISOString();
   const models = providerModelsFromSettings(
@@ -138,11 +239,6 @@ const makePendingOpenCodeProvider = (openCodeSettings: OpenCodeSettings): Server
     openCodeSettings.customModels,
     DEFAULT_OPENCODE_MODEL_CAPABILITIES,
   );
-  const usageLimits = makeUnavailableUsageLimits({
-    source: "opencodeManaged",
-    checkedAt,
-    reason: "Unable to fetch usage",
-  });
 
   if (!openCodeSettings.enabled) {
     return buildServerProvider({
@@ -159,7 +255,11 @@ const makePendingOpenCodeProvider = (openCodeSettings: OpenCodeSettings): Server
           openCodeSettings.serverUrl.trim().length > 0
             ? "OpenCode is disabled in fd code settings. A server URL is configured."
             : "OpenCode is disabled in fd code settings.",
-        usageLimits,
+        usageLimits: makeUnavailableUsageLimits({
+          source: "opencodeManaged",
+          checkedAt,
+          reason: "Unable to fetch usage",
+        }),
       },
     });
   }
@@ -175,204 +275,206 @@ const makePendingOpenCodeProvider = (openCodeSettings: OpenCodeSettings): Server
       status: "warning",
       auth: { status: "unknown" },
       message: "OpenCode provider status has not been checked in this session yet.",
-      usageLimits,
     },
   });
 };
 
-export function checkOpenCodeProviderStatus(input: {
-  readonly settings: OpenCodeSettings;
-  readonly cwd: string;
-}): Effect.Effect<ServerProvider> {
-  const checkedAt = new Date().toISOString();
-  const customModels = input.settings.customModels;
-  const isExternalServer = input.settings.serverUrl.trim().length > 0;
+export const OpenCodeProviderLive = Layer.effect(
+  OpenCodeProvider,
+  Effect.gen(function* () {
+    const serverSettings = yield* ServerSettingsService;
+    const serverConfig = yield* ServerConfig;
+    const openCodeRuntime = yield* OpenCodeRuntime;
 
-  const fallback = (cause: unknown, version: string | null = null) => {
-    const failure = formatOpenCodeProbeError({
-      cause,
-      isExternalServer,
-      serverUrl: input.settings.serverUrl,
-    });
-    return buildServerProvider({
-      provider: PROVIDER,
-      enabled: input.settings.enabled,
-      checkedAt,
-      models: providerModelsFromSettings(
-        [],
-        PROVIDER,
-        customModels,
-        DEFAULT_OPENCODE_MODEL_CAPABILITIES,
-      ),
-      probe: {
-        installed: failure.installed,
-        version,
-        status: "error",
-        auth: { status: "unknown" },
-        message: failure.message,
-        usageLimits: makeUnavailableUsageLimits({
-          source: "opencodeManaged",
+    const checkOpenCodeProviderStatus = Effect.fn("checkOpenCodeProviderStatus")(function* (input: {
+      readonly settings: OpenCodeSettings;
+      readonly cwd: string;
+    }): Effect.fn.Return<ServerProvider, never> {
+      const checkedAt = new Date().toISOString();
+      const customModels = input.settings.customModels;
+      const isExternalServer = input.settings.serverUrl.trim().length > 0;
+
+      const fallback = (cause: unknown, version: string | null = null) => {
+        const failure = formatOpenCodeProbeError({
+          cause,
+          isExternalServer,
+          serverUrl: input.settings.serverUrl,
+        });
+        return buildServerProvider({
+          provider: PROVIDER,
+          enabled: input.settings.enabled,
           checkedAt,
-          reason: "Unable to fetch usage",
-        }),
-      },
-    });
-  };
-
-  return Effect.gen(function* () {
-    if (!input.settings.enabled) {
-      return buildServerProvider({
-        provider: PROVIDER,
-        enabled: false,
-        checkedAt,
-        models: providerModelsFromSettings(
-          [],
-          PROVIDER,
-          customModels,
-          DEFAULT_OPENCODE_MODEL_CAPABILITIES,
-        ),
-        probe: {
-          installed: false,
-          version: null,
-          status: "warning",
-          auth: { status: "unknown" },
-          message: isExternalServer
-            ? "OpenCode is disabled in fd code settings. A server URL is configured."
-            : "OpenCode is disabled in fd code settings.",
+          models: providerModelsFromSettings(
+            [],
+            PROVIDER,
+            customModels,
+            DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+          ),
+          probe: {
+            installed: failure.installed,
+            version,
+            status: "error",
+            auth: { status: "unknown" },
+            message: failure.message,
           usageLimits: makeUnavailableUsageLimits({
             source: "opencodeManaged",
             checkedAt,
             reason: "Unable to fetch usage",
           }),
-        },
-      });
-    }
+        });
+      };
 
-    let version: string | null = null;
-    if (!isExternalServer) {
-      const versionExit = yield* Effect.exit(
-        Effect.tryPromise({
-          try: () =>
-            runOpenCodeCommand({
+      if (!input.settings.enabled) {
+        return buildServerProvider({
+          provider: PROVIDER,
+          enabled: false,
+          checkedAt,
+          models: providerModelsFromSettings(
+            [],
+            PROVIDER,
+            customModels,
+            DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+          ),
+          probe: {
+            installed: false,
+            version: null,
+            status: "warning",
+            auth: { status: "unknown" },
+            message: isExternalServer
+              ? "OpenCode is disabled in fd code settings. A server URL is configured."
+              : "OpenCode is disabled in fd code settings.",
+          usageLimits: makeUnavailableUsageLimits({
+            source: "opencodeManaged",
+            checkedAt,
+            reason: "Unable to fetch usage",
+          }),
+          },
+        });
+      }
+
+      let version: string | null = null;
+      if (!isExternalServer) {
+        const versionExit = yield* Effect.exit(
+          openCodeRuntime
+            .runOpenCodeCommand({
               binaryPath: input.settings.binaryPath,
               args: ["--version"],
-            }),
-          catch: toOpenCodeProbeError,
-        }),
-      );
-      if (versionExit._tag === "Failure") {
-        return fallback(Cause.squash(versionExit.cause));
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+              ),
+            ),
+        );
+        if (versionExit._tag === "Failure") {
+          return fallback(Cause.squash(versionExit.cause));
+        }
+        version = parseGenericCliVersion(versionExit.value.stdout) ?? null;
       }
-      version = parseGenericCliVersion(versionExit.value.stdout) ?? null;
-    }
 
-    const inventoryExit = yield* Effect.exit(
-      Effect.acquireUseRelease(
-        Effect.tryPromise({
-          try: () =>
-            connectToOpenCodeServer({
-              binaryPath: input.settings.binaryPath,
-              serverUrl: input.settings.serverUrl,
-            }),
-          catch: toOpenCodeProbeError,
-        }),
-        (server) =>
-          Effect.tryPromise({
-            try: async () => {
-              const client = createOpenCodeSdkClient({
-                baseUrl: server.url,
-                directory: input.cwd,
-                ...(isExternalServer && input.settings.serverPassword
-                  ? { serverPassword: input.settings.serverPassword }
-                  : {}),
-              });
-              return await loadOpenCodeInventory(client);
-            },
-            catch: toOpenCodeProbeError,
+      const inventoryExit = yield* Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const server = yield* openCodeRuntime
+              .connectToOpenCodeServer({
+                binaryPath: input.settings.binaryPath,
+                serverUrl: input.settings.serverUrl,
+              })
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+                ),
+              );
+            return yield* openCodeRuntime
+              .loadOpenCodeInventory(
+                openCodeRuntime.createOpenCodeSdkClient({
+                  baseUrl: server.url,
+                  directory: input.cwd,
+                  ...(isExternalServer && input.settings.serverPassword
+                    ? { serverPassword: input.settings.serverPassword }
+                    : {}),
+                }),
+              )
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OpenCodeProbeError({ cause, detail: openCodeRuntimeErrorDetail(cause) }),
+                ),
+              );
           }),
-        (server) => Effect.sync(() => server.close()),
-      ),
-    );
-    if (inventoryExit._tag === "Failure") {
-      return fallback(Cause.squash(inventoryExit.cause), version);
-    }
-
-    const models = providerModelsFromSettings(
-      flattenOpenCodeModels(inventoryExit.value),
-      PROVIDER,
-      customModels,
-      DEFAULT_OPENCODE_MODEL_CAPABILITIES,
-    );
-    const usageLimits =
-      resolveOpenCodeManagedUsageLimits({
-        checkedAt,
-        inventory: inventoryExit.value,
-      }) ??
-      makeUnavailableUsageLimits({
-        source: "opencodeManaged",
-        checkedAt,
-        reason: "Unable to fetch usage",
-      });
-    const connectedCount = inventoryExit.value.providerList.connected.length;
-    const connectedManagedCount = inventoryExit.value.providerList.connected.filter(
-      (providerId) => getOpenCodeManagedProviderDescriptor(providerId) !== undefined,
-    ).length;
-    return buildServerProvider({
-      provider: PROVIDER,
-      enabled: true,
-      checkedAt,
-      models,
-      probe: {
-        installed: true,
-        version,
-        status: connectedCount > 0 ? "ready" : "warning",
-        auth: {
-          status: connectedCount > 0 ? "authenticated" : "unknown",
-          type: "opencode",
-        },
-        usageLimits,
-        message:
-          connectedManagedCount > 0
-            ? `${connectedManagedCount} OpenCode-managed provider${connectedManagedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
-            : connectedCount > 0
-              ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
-              : isExternalServer
-                ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
-                : "OpenCode is available, but it did not report any connected upstream providers.",
-      },
-    });
-  });
-}
-
-export function makeOpenCodeProviderLive() {
-  return Layer.effect(
-    OpenCodeProvider,
-    Effect.gen(function* () {
-      const serverSettings = yield* ServerSettingsService;
-      const serverConfig = yield* ServerConfig;
-
-      const getProviderSettings = serverSettings.getSettings.pipe(
-        Effect.map((settings) => settings.providers.opencode),
+        ),
       );
+      if (inventoryExit._tag === "Failure") {
+        return fallback(Cause.squash(inventoryExit.cause), version);
+      }
 
-      return yield* makeManagedServerProvider<OpenCodeSettings>({
-        getSettings: getProviderSettings.pipe(Effect.orDie),
-        streamSettings: serverSettings.streamChanges.pipe(
-          Stream.map((settings) => settings.providers.opencode),
-        ),
-        haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
-        initialSnapshot: makePendingOpenCodeProvider,
-        checkProvider: getProviderSettings.pipe(
-          Effect.flatMap((settings) =>
-            checkOpenCodeProviderStatus({
-              settings,
-              cwd: serverConfig.cwd,
-            }),
-          ),
-        ),
+      const models = providerModelsFromSettings(
+        flattenOpenCodeModels(inventoryExit.value),
+        PROVIDER,
+        customModels,
+        DEFAULT_OPENCODE_MODEL_CAPABILITIES,
+      );
+      const usageLimits =
+        resolveOpenCodeManagedUsageLimits({
+          checkedAt,
+          inventory: inventoryExit.value,
+        }) ??
+        makeUnavailableUsageLimits({
+          source: "opencodeManaged",
+          checkedAt,
+          reason: "Unable to fetch usage",
+        });
+      const connectedCount = inventoryExit.value.providerList.connected.length;
+      const connectedManagedCount = inventoryExit.value.providerList.connected.filter(
+        (providerId) => getOpenCodeManagedProviderDescriptor(providerId) !== undefined,
+      ).length;
+      return buildServerProvider({
+        provider: PROVIDER,
+        enabled: true,
+        checkedAt,
+        models,
+        probe: {
+          installed: true,
+          version,
+          status: connectedCount > 0 ? "ready" : "warning",
+          auth: {
+            status: connectedCount > 0 ? "authenticated" : "unknown",
+            type: "opencode",
+          },
+          usageLimits,
+          message:
+            connectedManagedCount > 0
+              ? `${connectedManagedCount} OpenCode-managed provider${connectedManagedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
+              : connectedCount > 0
+                ? `${connectedCount} upstream provider${connectedCount === 1 ? "" : "s"} connected through ${isExternalServer ? "the configured OpenCode server" : "OpenCode"}.`
+                : isExternalServer
+                  ? "Connected to the configured OpenCode server, but it did not report any connected upstream providers."
+                  : "OpenCode is available, but it did not report any connected upstream providers.",
+        },
       });
-    }),
-  );
-}
+    });
 
-export const OpenCodeProviderLive = makeOpenCodeProviderLive();
+    const getProviderSettings = serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.providers.opencode),
+    );
+
+    return yield* makeManagedServerProvider<OpenCodeSettings>({
+      getSettings: getProviderSettings.pipe(Effect.orDie),
+      streamSettings: serverSettings.streamChanges.pipe(
+        Stream.map((settings) => settings.providers.opencode),
+      ),
+      haveSettingsChanged: (previous, next) => !Equal.equals(previous, next),
+      initialSnapshot: makePendingOpenCodeProvider,
+      checkProvider: getProviderSettings.pipe(
+        Effect.flatMap((settings) =>
+          checkOpenCodeProviderStatus({
+            settings,
+            cwd: serverConfig.cwd,
+          }),
+        ),
+      ),
+    });
+  }),
+);

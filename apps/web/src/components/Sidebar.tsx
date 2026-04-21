@@ -184,6 +184,7 @@ import {
   derivePhysicalProjectKey,
   deriveProjectGroupingOverrideKey,
   deriveLogicalProjectKey,
+  getProjectOrderKey,
 } from "../logicalProject";
 import {
   useSavedEnvironmentRegistryStore,
@@ -3143,7 +3144,7 @@ export default function Sidebar() {
     return orderItemsByPreferredIds({
       items: nonChatProjects,
       preferredIds: projectOrder,
-      getId: (project) => scopedProjectKey(scopeProjectRef(project.environmentId, project.id)),
+      getId: getProjectOrderKey,
     });
   }, [projectOrder, projects, homeDir]);
 

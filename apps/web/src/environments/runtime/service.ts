@@ -60,11 +60,15 @@ import {
 } from "~/store";
 import { useTerminalUiStateStore } from "~/terminalUiStateStore";
 import { useUiStateStore } from "~/uiStateStore";
-import { WsTransport } from "~/rpc/wsTransport";
-import { derivePhysicalProjectKey } from "../../logicalProject";
+import { WsTransport } from "../../rpc/wsTransport";
+import {
+  deriveLogicalProjectKeyFromSettings,
+  derivePhysicalProjectKey,
+} from "../../logicalProject";
 import { subscribeTerminalMetadata, terminalSessionManager } from "../../terminalSessionState";
 import { resetWsReconnectBackoff } from "~/rpc/wsConnectionState";
 import { startPortsStateSync } from "~/rpc/portsState";
+import { getClientSettings } from "~/hooks/useSettings";
 
 type EnvironmentServiceState = {
   readonly queryClient: QueryClient;
@@ -473,9 +477,11 @@ function coalesceOrchestrationUiEvents(
 
 function syncProjectUiFromStore() {
   const projects = selectProjectsAcrossEnvironments(useStore.getState());
+  const clientSettings = getClientSettings();
   useUiStateStore.getState().syncProjects(
     projects.map((project) => ({
       key: derivePhysicalProjectKey(project),
+      logicalKey: deriveLogicalProjectKeyFromSettings(project, clientSettings),
       cwd: project.cwd,
     })),
   );
@@ -535,9 +541,11 @@ function applyRecoveredEventBatch(
   useStore.getState().applyOrchestrationEvents(uiEvents, environmentId);
   if (needsProjectUiSync) {
     const projects = selectProjectsAcrossEnvironments(useStore.getState());
+    const clientSettings = getClientSettings();
     useUiStateStore.getState().syncProjects(
       projects.map((project) => ({
         key: derivePhysicalProjectKey(project),
+        logicalKey: deriveLogicalProjectKeyFromSettings(project, clientSettings),
         cwd: project.cwd,
       })),
     );
