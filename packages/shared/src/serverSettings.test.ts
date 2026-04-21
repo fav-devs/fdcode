@@ -135,4 +135,36 @@ describe("serverSettings helpers", () => {
       model: "openai/gpt-5",
     });
   });
+
+  it("preserves copilot-only options when replacing with a copilot selection", () => {
+    const current = {
+      ...DEFAULT_SERVER_SETTINGS,
+      textGenerationModelSelection: {
+        provider: "codex" as const,
+        model: "gpt-5.4-mini",
+        options: {
+          reasoningEffort: "high" as const,
+          fastMode: true,
+        },
+      },
+    };
+
+    expect(
+      applyServerSettingsPatch(current, {
+        textGenerationModelSelection: {
+          provider: "copilot",
+          model: "gpt-4.1",
+          options: {
+            reasoningEffort: "xhigh",
+          },
+        },
+      }).textGenerationModelSelection,
+    ).toEqual({
+      provider: "copilot",
+      model: "gpt-4.1",
+      options: {
+        reasoningEffort: "xhigh",
+      },
+    });
+  });
 });
