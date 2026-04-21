@@ -4,6 +4,8 @@ import {
   type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
+  type GeminiModelOptions,
+  type ModelSelection,
   type OpenCodeModelOptions,
   type ServerSettingsPatch,
 } from "@t3tools/contracts";
@@ -77,43 +79,47 @@ export function applyServerSettingsPatch(
 
   return {
     ...next,
-    textGenerationModelSelection:
-      provider === "codex"
-        ? {
+    textGenerationModelSelection: (() => {
+      switch (provider) {
+        case "codex":
+          return {
             provider,
             model,
             ...withModelSelectionOptions(selectionPatch.options as CodexModelOptions | undefined),
-          }
-        : provider === "copilot"
-          ? {
-              provider,
-              model,
-              ...withModelSelectionOptions(
-                selectionPatch.options as CopilotModelOptions | undefined,
-              ),
-            }
-          : provider === "claudeAgent"
-            ? {
-                provider,
-                model,
-                ...withModelSelectionOptions(
-                  selectionPatch.options as ClaudeModelOptions | undefined,
-                ),
-              }
-            : provider === "cursor"
-              ? {
-                  provider,
-                  model,
-                  ...withModelSelectionOptions(
-                    selectionPatch.options as CursorModelOptions | undefined,
-                  ),
-                }
-              : {
-                  provider,
-                  model,
-                  ...withModelSelectionOptions(
-                    selectionPatch.options as OpenCodeModelOptions | undefined,
-                  ),
-                },
+          } satisfies ModelSelection;
+        case "copilot":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(selectionPatch.options as CopilotModelOptions | undefined),
+          } satisfies ModelSelection;
+        case "claudeAgent":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(selectionPatch.options as ClaudeModelOptions | undefined),
+          } satisfies ModelSelection;
+        case "cursor":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(selectionPatch.options as CursorModelOptions | undefined),
+          } satisfies ModelSelection;
+        case "gemini":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(selectionPatch.options as GeminiModelOptions | undefined),
+          } satisfies ModelSelection;
+        case "opencode":
+          return {
+            provider,
+            model,
+            ...withModelSelectionOptions(
+              selectionPatch.options as OpenCodeModelOptions | undefined,
+            ),
+          } satisfies ModelSelection;
+      }
+    })(),
   };
 }

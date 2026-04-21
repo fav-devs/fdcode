@@ -770,6 +770,7 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
+                        streamKind: event.streamKind,
                         ...(event.itemId ? { itemId: event.itemId } : {}),
                         text: event.text,
                         rawPayload: event.rawPayload,
@@ -780,7 +781,7 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                     yield* logNative(
                       ctx.threadId,
                       "session/update",
-                      event.payload.rawPayload,
+                      event.rawPayload,
                       "acp.jsonrpc",
                     );
                     yield* offerRuntimeEvent(
@@ -789,11 +790,13 @@ function makeCursorAdapter(options?: CursorAdapterLiveOptions) {
                         provider: PROVIDER,
                         threadId: ctx.threadId,
                         turnId: ctx.activeTurnId,
-                        size: event.payload.size,
-                        used: event.payload.used,
-                        rawPayload: event.payload.rawPayload,
+                        size: event.usage.maxTokens ?? 0,
+                        used: event.usage.usedTokens,
+                        rawPayload: event.rawPayload,
                       }),
                     );
+                    return;
+                  case "ThreadMetadataUpdated":
                     return;
                 }
               }),

@@ -1,19 +1,33 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MODEL_BY_PROVIDER, type ModelCapabilities } from "@t3tools/contracts";
+import {
+  DEFAULT_MODEL_BY_PROVIDER,
+  type GeminiModelOptions,
+  type ModelCapabilities,
+} from "@t3tools/contracts";
 
 import {
   applyClaudePromptEffortPrefix,
+  DEFAULT_GEMINI_MODEL_CAPABILITIES,
+  geminiCapabilitiesForModel,
+  geminiModelOptionsFromEffortValue,
   getDefaultContextWindow,
   getDefaultEffort,
+  getGeminiThinkingConfigKind,
+  getGeminiThinkingModelAlias,
+  GEMINI_2_5_MODEL_CAPABILITIES,
+  GEMINI_3_MODEL_CAPABILITIES,
   hasContextWindowOption,
   hasEffortLevel,
   isClaudeUltrathinkPrompt,
+  mergeGeminiModelOptions,
   normalizeClaudeModelOptionsWithCapabilities,
   normalizeCopilotModelOptionsWithCapabilities,
   normalizeCodexModelOptionsWithCapabilities,
+  normalizeGeminiModelOptionsWithCapabilities,
   normalizeModelSlug,
   resolveContextWindow,
   resolveEffort,
+  resolveApiModelId,
   resolveModelSlugForProvider,
   resolveSelectableModel,
   trimOrNull,
@@ -51,6 +65,28 @@ const copilotCaps: ModelCapabilities = {
     { value: "medium", label: "Medium" },
     { value: "high", label: "High", isDefault: true },
     { value: "xhigh", label: "Extra High" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+const gemini3Caps: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "HIGH", label: "High", isDefault: true },
+    { value: "LOW", label: "Low" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+const gemini25Caps: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "-1", label: "Dynamic", isDefault: true },
+    { value: "512", label: "512 Tokens" },
   ],
   supportsFastMode: false,
   supportsThinkingToggle: false,
@@ -210,6 +246,61 @@ describe("resolveContextWindow", () => {
   });
 });
 
+describe("resolveApiModelId", () => {
+  it("appends [1m] suffix for 1m context window", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "1m" },
+      }),
+    ).toBe("claude-opus-4-6[1m]");
+  });
+
+  it("returns the model as-is for 200k context window", () => {
+    expect(
+      resolveApiModelId({
+        provider: "claudeAgent",
+        model: "claude-opus-4-6",
+        options: { contextWindow: "200k" },
+      }),
+    ).toBe("claude-opus-4-6");
+  });
+
+  it("returns the model as-is when no context window is set", () => {
+    expect(resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6" })).toBe(
+      "claude-opus-4-6",
+    );
+    expect(
+      resolveApiModelId({ provider: "claudeAgent", model: "claude-opus-4-6", options: {} }),
+    ).toBe("claude-opus-4-6");
+  });
+
+  it("returns the model as-is for Codex selections", () => {
+    expect(resolveApiModelId({ provider: "codex", model: "gpt-5.4" })).toBe("gpt-5.4");
+  });
+
+  it("maps Gemini 3 thinking selections to a generated alias", () => {
+    expect(
+      resolveApiModelId({
+        provider: "gemini",
+        model: "auto-gemini-3",
+        options: { thinkingLevel: "LOW" },
+      }),
+    ).toBe("t3code-gemini-auto-gemini-3-thinking-level-low");
+  });
+
+  it("maps Gemini 2.5 thinking budgets to a generated alias", () => {
+    expect(
+      resolveApiModelId({
+        provider: "gemini",
+        model: "gemini-2.5-flash",
+        options: { thinkingBudget: 0 },
+      }),
+    ).toBe("gemini-2.5-flash");
+  });
+});
+
 describe("normalize*ModelOptionsWithCapabilities", () => {
   it("preserves explicit false codex fast mode", () => {
     expect(
@@ -279,5 +370,111 @@ describe("normalize*ModelOptionsWithCapabilities", () => {
     ).toEqual({
       thinking: true,
     });
+  });
+
+  it("normalizes Gemini 3 selections to thinkingLevel values", () => {
+    expect(
+      normalizeGeminiModelOptionsWithCapabilities(gemini3Caps, {
+        thinkingBudget: 512,
+      }),
+    ).toEqual({
+      thinkingLevel: "HIGH",
+    });
+
+    expect(
+      normalizeGeminiModelOptionsWithCapabilities(gemini3Caps, {
+        thinkingLevel: "LOW",
+      }),
+    ).toEqual({
+      thinkingLevel: "LOW",
+    });
+  });
+
+  it("normalizes Gemini 2.5 selections to thinkingBudget values", () => {
+    expect(normalizeGeminiModelOptionsWithCapabilities(gemini25Caps, undefined)).toEqual({
+      thinkingBudget: -1,
+    });
+
+    expect(
+      normalizeGeminiModelOptionsWithCapabilities(gemini25Caps, {
+        thinkingLevel: "LOW",
+        thinkingBudget: 0,
+      }),
+    ).toEqual({
+      thinkingBudget: -1,
+    });
+  });
+});
+
+describe("Gemini helpers", () => {
+  it("classifies Gemini model families for thinking config", () => {
+    expect(getGeminiThinkingConfigKind("auto-gemini-3")).toBe("level");
+    expect(getGeminiThinkingConfigKind("gemini-3.1-pro-preview")).toBe("level");
+    expect(getGeminiThinkingConfigKind("auto-gemini-2.5")).toBe("budget");
+    expect(getGeminiThinkingConfigKind("gemini-2.5-flash")).toBe("budget");
+    expect(getGeminiThinkingConfigKind("custom-model")).toBeNull();
+  });
+
+  it("builds Gemini model options from effort values", () => {
+    expect(geminiModelOptionsFromEffortValue("HIGH")).toEqual({ thinkingLevel: "HIGH" });
+    expect(geminiModelOptionsFromEffortValue("512")).toEqual({ thinkingBudget: 512 });
+    expect(geminiModelOptionsFromEffortValue("bogus")).toBeUndefined();
+  });
+
+  it("merges Gemini model options while clearing incompatible thinking fields", () => {
+    expect(
+      mergeGeminiModelOptions(
+        {
+          thinkingBudget: 0,
+        },
+        { thinkingLevel: "LOW" },
+      ),
+    ).toEqual({
+      thinkingLevel: "LOW",
+    });
+
+    expect(
+      mergeGeminiModelOptions(
+        {
+          thinkingLevel: "HIGH",
+          keepFutureOption: true,
+        } as GeminiModelOptions,
+        { thinkingBudget: 512 },
+      ),
+    ).toMatchObject({
+      thinkingBudget: 512,
+      keepFutureOption: true,
+    });
+  });
+
+  it("builds Gemini thinking aliases only for matching model families", () => {
+    expect(
+      getGeminiThinkingModelAlias("auto-gemini-3", {
+        thinkingLevel: "HIGH",
+      }),
+    ).toBe("t3code-gemini-auto-gemini-3-thinking-level-high");
+    expect(
+      getGeminiThinkingModelAlias("gemini-2.5-pro", {
+        thinkingBudget: -1,
+      }),
+    ).toBe("t3code-gemini-gemini-2-5-pro-thinking-budget-dynamic");
+    expect(
+      getGeminiThinkingModelAlias("custom-model", {
+        thinkingLevel: "HIGH",
+      }),
+    ).toBeNull();
+    expect(
+      getGeminiThinkingModelAlias("gemini-2.5-flash", {
+        thinkingBudget: 0,
+      }),
+    ).toBeNull();
+  });
+
+  it("maps Gemini model families to capability presets", () => {
+    expect(geminiCapabilitiesForModel("gemini-3.1-pro-preview")).toEqual(
+      GEMINI_3_MODEL_CAPABILITIES,
+    );
+    expect(geminiCapabilitiesForModel("gemini-2.5-flash")).toEqual(GEMINI_2_5_MODEL_CAPABILITIES);
+    expect(geminiCapabilitiesForModel("custom-model")).toEqual(DEFAULT_GEMINI_MODEL_CAPABILITIES);
   });
 });

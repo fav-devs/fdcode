@@ -23,6 +23,7 @@ import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter.ts";
 import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter.ts";
 import { makeCopilotAdapterLive } from "./provider/Layers/CopilotAdapter.ts";
 import { makeCursorAdapterLive } from "./provider/Layers/CursorAdapter.ts";
+import { makeGeminiAdapterLive } from "./provider/Layers/GeminiAdapter.ts";
 import { makeOpenCodeAdapterLive } from "./provider/Layers/OpenCodeAdapter.ts";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry.ts";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService.ts";
@@ -165,6 +166,9 @@ const ProviderLayerLive = Layer.unwrap(
     const claudeAdapterLayer = makeClaudeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const geminiAdapterLayer = makeGeminiAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    );
     const openCodeAdapterLayer = makeOpenCodeAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
@@ -175,6 +179,7 @@ const ProviderLayerLive = Layer.unwrap(
       Layer.provide(codexAdapterLayer),
       Layer.provide(copilotAdapterLayer),
       Layer.provide(claudeAdapterLayer),
+      Layer.provide(geminiAdapterLayer),
       Layer.provide(openCodeAdapterLayer),
       Layer.provide(cursorAdapterLayer),
       Layer.provideMerge(ProviderSessionDirectoryLayerLive),

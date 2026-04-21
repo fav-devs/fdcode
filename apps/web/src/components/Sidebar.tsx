@@ -11,6 +11,7 @@ import {
   SquarePenIcon,
   TerminalIcon,
   TriangleAlertIcon,
+  XIcon,
 } from "lucide-react";
 import {
   prStatusIndicator,
@@ -302,6 +303,7 @@ interface SidebarThreadRowProps {
     position: { x: number; y: number },
   ) => Promise<void>;
   clearSelection: () => void;
+  clearThreadNotification: (thread: SidebarThreadSummary) => void;
   commitRename: (
     threadRef: ScopedThreadRef,
     newTitle: string,
@@ -332,6 +334,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     handleMultiSelectContextMenu,
     handleThreadContextMenu,
     clearSelection,
+    clearThreadNotification,
     commitRename,
     cancelRename,
     attemptArchiveThread,
@@ -343,6 +346,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
   const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
+  const dismissedStatusKey = useUiStateStore(
+    (state) => state.threadDismissedStatusKeyById[threadKey],
+  );
   const isSelected = useThreadSelectionStore((state) => state.selectedThreadKeys.has(threadKey));
   const hasSelection = useThreadSelectionStore((state) => state.selectedThreadKeys.size > 0);
   const runningTerminalIds = useThreadRunningTerminalIds({
@@ -383,6 +389,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
+      dismissedStatusKey,
       lastVisitedAt,
     },
   });
@@ -571,7 +578,15 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     },
     [threadKey, togglePinnedThread],
   );
-  const rowButtonRender = useMemo(() => <button type="button" />, []);
+  const handleClearNotificationClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      clearThreadNotification(thread);
+    },
+    [clearThreadNotification, thread],
+  );
+  const rowButtonRender = useMemo(() => <div role="button" tabIndex={0} />, []);
 
   return (
     <SidebarMenuSubItem
@@ -680,7 +695,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
               </button>
             ) : !isThreadRunning ? (
               appSettingsConfirmThreadArchive ? (
-                <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                  {threadStatus?.dismissible ? (
+                    <button
+                      type="button"
+                      data-thread-selection-safe
+                      data-testid={`thread-clear-notification-${thread.id}`}
+                      aria-label={`Clear notification for ${thread.title}`}
+                      className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      onPointerDown={stopPropagationOnPointerDown}
+                      onClick={handleClearNotificationClick}
+                    >
+                      <XIcon className="size-3.5" />
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     data-thread-selection-safe
@@ -694,10 +722,23 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   </button>
                 </div>
               ) : (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <div className="pointer-events-none absolute top-1/2 right-1 -translate-y-1/2 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                <div className="pointer-events-none absolute top-1/2 right-1 flex -translate-y-1/2 items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/menu-sub-item:pointer-events-auto group-hover/menu-sub-item:opacity-100 group-focus-within/menu-sub-item:pointer-events-auto group-focus-within/menu-sub-item:opacity-100">
+                  {threadStatus?.dismissible ? (
+                    <button
+                      type="button"
+                      data-thread-selection-safe
+                      data-testid={`thread-clear-notification-${thread.id}`}
+                      aria-label={`Clear notification for ${thread.title}`}
+                      className="inline-flex size-5 cursor-pointer items-center justify-center text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+                      onPointerDown={stopPropagationOnPointerDown}
+                      onClick={handleClearNotificationClick}
+                    >
+                      <XIcon className="size-3.5" />
+                    </button>
+                  ) : null}
+                  <Tooltip>
+                    <TooltipTrigger
+                      render={
                         <button
                           type="button"
                           data-thread-selection-safe
@@ -709,11 +750,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         >
                           <ArchiveIcon className="size-3.5" />
                         </button>
-                      </div>
-                    }
-                  />
-                  <TooltipPopup side="top">Archive</TooltipPopup>
-                </Tooltip>
+                      }
+                    />
+                    <TooltipPopup side="top">Archive</TooltipPopup>
+                  </Tooltip>
+                </div>
               )
             ) : null}
             <span className={threadMetaClassName}>
@@ -792,6 +833,7 @@ interface SidebarProjectThreadListProps {
     position: { x: number; y: number },
   ) => Promise<void>;
   clearSelection: () => void;
+  clearThreadNotification: (thread: SidebarThreadSummary) => void;
   commitRename: (
     threadRef: ScopedThreadRef,
     newTitle: string,
@@ -837,6 +879,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
     handleMultiSelectContextMenu,
     handleThreadContextMenu,
     clearSelection,
+    clearThreadNotification,
     commitRename,
     cancelRename,
     attemptArchiveThread,
@@ -890,6 +933,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
               handleMultiSelectContextMenu={handleMultiSelectContextMenu}
               handleThreadContextMenu={handleThreadContextMenu}
               clearSelection={clearSelection}
+              clearThreadNotification={clearThreadNotification}
               commitRename={commitRename}
               cancelRename={cancelRename}
               attemptArchiveThread={attemptArchiveThread}
@@ -992,6 +1036,8 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
   }));
   const { updateSettings } = useUpdateSettings();
   const router = useRouter();
+  const dismissThreadStatus = useUiStateStore((state) => state.dismissThreadStatus);
+  const markThreadVisited = useUiStateStore((state) => state.markThreadVisited);
   const markThreadUnread = useUiStateStore((state) => state.markThreadUnread);
   const toggleProject = useUiStateStore((state) => state.toggleProject);
   const toggleThreadSelection = useThreadSelectionStore((state) => state.toggleThread);
@@ -1106,6 +1152,16 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     ),
   );
+  const threadDismissedStatusKeys = useUiStateStore(
+    useShallow((state) =>
+      projectThreads.map(
+        (thread) =>
+          state.threadDismissedStatusKeyById[
+            scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
+          ] ?? null,
+      ),
+    ),
+  );
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
   const [renamingTitle, setRenamingTitle] = useState("");
   const [confirmingArchiveThreadKey, setConfirmingArchiveThreadKey] = useState<string | null>(null);
@@ -1154,13 +1210,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         threadLastVisitedAts[index] ?? null,
       ]),
     );
+    const dismissedStatusKeyByThreadKey = new Map(
+      projectThreads.map((thread, index) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        threadDismissedStatusKeys[index] ?? null,
+      ]),
+    );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
       const lastVisitedAt = lastVisitedAtByThreadKey.get(
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      );
+      const dismissedStatusKey = dismissedStatusKeyByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
+          ...(dismissedStatusKey !== null && dismissedStatusKey !== undefined
+            ? { dismissedStatusKey }
+            : {}),
           ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
         },
       });
@@ -1183,7 +1251,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       projectStatus,
       visibleProjectThreads,
     };
-  }, [pinnedThreadKeys, projectThreads, threadLastVisitedAts, threadSortOrder]);
+  }, [pinnedThreadKeys, projectThreads, threadDismissedStatusKeys, threadLastVisitedAts, threadSortOrder]);
 
   const pinnedCollapsedThread = useMemo(() => {
     const activeThreadKey = activeRouteThreadKey ?? undefined;
@@ -1211,13 +1279,25 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         threadLastVisitedAts[index] ?? null,
       ]),
     );
+    const dismissedStatusKeyByThreadKey = new Map(
+      projectThreads.map((thread, index) => [
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+        threadDismissedStatusKeys[index] ?? null,
+      ]),
+    );
     const resolveProjectThreadStatus = (thread: SidebarThreadSummary) => {
       const lastVisitedAt = lastVisitedAtByThreadKey.get(
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
+      );
+      const dismissedStatusKey = dismissedStatusKeyByThreadKey.get(
         scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)),
       );
       return resolveThreadStatusPill({
         thread: {
           ...thread,
+          ...(dismissedStatusKey !== null && dismissedStatusKey !== undefined
+            ? { dismissedStatusKey }
+            : {}),
           ...(lastVisitedAt !== null && lastVisitedAt !== undefined ? { lastVisitedAt } : {}),
         },
       });
@@ -1255,6 +1335,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     pinnedCollapsedThread,
     projectExpanded,
     projectThreads,
+    threadDismissedStatusKeys,
     threadLastVisitedAts,
     visibleProjectThreads,
   ]);
@@ -1926,6 +2007,28 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
     updateSettings,
   ]);
 
+  const clearThreadNotification = useCallback(
+    (thread: SidebarThreadSummary) => {
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const threadStatus = resolveThreadStatusPill({
+        thread: {
+          ...thread,
+          dismissedStatusKey: useUiStateStore.getState().threadDismissedStatusKeyById[threadKey],
+          lastVisitedAt: useUiStateStore.getState().threadLastVisitedAtById[threadKey],
+        },
+      });
+      if (!threadStatus?.dismissible) {
+        return;
+      }
+      if (threadStatus.label === "Completed") {
+        markThreadVisited(threadKey, thread.latestTurn?.completedAt ?? undefined);
+        return;
+      }
+      dismissThreadStatus(threadKey, threadStatus.dismissalKey);
+    },
+    [dismissThreadStatus, markThreadVisited],
+  );
+
   const handleThreadContextMenu = useCallback(
     async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
       const api = readLocalApi();
@@ -1937,6 +2040,13 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         scopedProjectKey(scopeProjectRef(thread.environmentId, thread.projectId)),
       );
       const threadWorkspacePath = thread.worktreePath ?? threadProject?.cwd ?? project.cwd ?? null;
+      const threadStatus = resolveThreadStatusPill({
+        thread: {
+          ...thread,
+          dismissedStatusKey: useUiStateStore.getState().threadDismissedStatusKeyById[threadKey],
+          lastVisitedAt: useUiStateStore.getState().threadLastVisitedAtById[threadKey],
+        },
+      });
       const clicked = await api.contextMenu.show(
         [
           { id: "open-split-right", label: "Open in split right" },
@@ -1946,6 +2056,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             id: "toggle-pin",
             label: pinnedThreadKeySet.has(threadKey) ? "Unpin thread" : "Pin thread",
           },
+          ...(threadStatus?.dismissible
+            ? ([{ id: "clear-notification", label: "Clear notification" }] satisfies ContextMenuItem[])
+            : []),
           { id: "mark-unread", label: "Mark unread" },
           { id: "copy-path", label: "Copy Path" },
           { id: "copy-thread-id", label: "Copy Thread ID" },
@@ -1987,6 +2100,10 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         togglePinnedThread(threadKey);
         return;
       }
+      if (clicked === "clear-notification") {
+        clearThreadNotification(thread);
+        return;
+      }
       if (clicked === "copy-path") {
         if (!threadWorkspacePath) {
           toastManager.add({
@@ -2021,6 +2138,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       appSettingsConfirmThreadDelete,
       copyPathToClipboard,
       copyThreadIdToClipboard,
+      clearThreadNotification,
       deleteThread,
       markThreadUnread,
       memberProjectByScopedKey,
@@ -2156,6 +2274,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         handleMultiSelectContextMenu={handleMultiSelectContextMenu}
         handleThreadContextMenu={handleThreadContextMenu}
         clearSelection={clearSelection}
+        clearThreadNotification={clearThreadNotification}
         commitRename={commitRename}
         cancelRename={cancelRename}
         attemptArchiveThread={attemptArchiveThread}

@@ -5,6 +5,7 @@ import {
   type ServerProviderModel,
 } from "@t3tools/contracts";
 import {
+  getGeminiThinkingSelectionValue,
   isClaudeUltrathinkPrompt,
   normalizeProviderModelOptionsWithCapabilities,
   resolveEffort,
@@ -101,15 +102,17 @@ function getProviderStateFromCapabilities(
   const caps = getProviderModelCapabilities(models, model, provider);
   const providerOptions = modelOptions?.[provider];
   const rawEffort = providerOptions
-    ? "effort" in providerOptions
-      ? providerOptions.effort
-      : "reasoningEffort" in providerOptions
-        ? providerOptions.reasoningEffort
-        : "reasoning" in providerOptions
-          ? providerOptions.reasoning
-          : "variant" in providerOptions
-            ? providerOptions.variant
-            : null
+    ? provider === "gemini"
+      ? getGeminiThinkingSelectionValue(caps, modelOptions?.gemini)
+      : "effort" in providerOptions
+        ? providerOptions.effort
+        : "reasoningEffort" in providerOptions
+          ? providerOptions.reasoningEffort
+          : "reasoning" in providerOptions
+            ? providerOptions.reasoning
+            : "variant" in providerOptions
+              ? providerOptions.variant
+              : null
     : null;
   const normalizedOptions = normalizeProviderModelOptionsWithCapabilities(
     provider,
@@ -160,6 +163,7 @@ const composerProviderRegistry: Record<ProviderKind, ProviderRegistryEntry> = {
   codex: createProviderRegistryEntry("codex"),
   copilot: createProviderRegistryEntry("copilot"),
   claudeAgent: createProviderRegistryEntry("claudeAgent"),
+  gemini: createProviderRegistryEntry("gemini"),
   cursor: createProviderRegistryEntry("cursor"),
   opencode: createProviderRegistryEntry("opencode", {
     showInteractionModeToggle: false,

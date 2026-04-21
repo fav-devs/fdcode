@@ -2,6 +2,7 @@ import {
   DEFAULT_GIT_TEXT_GENERATION_MODEL_BY_PROVIDER,
   type ModelSelection,
   type ProviderKind,
+  type ProviderModelOptions,
   type ServerProvider,
 } from "@t3tools/contracts";
 import {
@@ -16,7 +17,8 @@ import {
   getProviderModels,
   resolveSelectableProvider,
 } from "./providerModels";
-import { ModelEsque } from "./components/chat/providerIconUtils";
+import { type ModelEsque } from "./components/chat/providerIconUtils";
+import { formatAppModelOptionName } from "./providerModelNames";
 
 const MAX_CUSTOM_MODEL_COUNT = 32;
 export const MAX_CUSTOM_MODEL_LENGTH = 256;
@@ -59,6 +61,13 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
     placeholder: "your-claude-model-slug",
     example: "claude-sonnet-5-0",
   },
+  gemini: {
+    provider: "gemini",
+    title: "Gemini",
+    description: "Save additional Gemini model ids for the picker and `/model` command.",
+    placeholder: "your-gemini-model-id",
+    example: "gemini-model-id-from-cli",
+  },
   cursor: {
     provider: "cursor",
     title: "Cursor",
@@ -76,6 +85,14 @@ const PROVIDER_CUSTOM_MODEL_CONFIG: Record<ProviderKind, ProviderCustomModelConf
 };
 
 export const MODEL_PROVIDER_SETTINGS = Object.values(PROVIDER_CUSTOM_MODEL_CONFIG);
+
+export function buildModelSelection(input: {
+  provider: ProviderKind;
+  model: string;
+  options?: ProviderModelOptions[ProviderKind];
+}): ModelSelection {
+  return createModelSelection(input.provider, input.model, input.options);
+}
 
 export function normalizeCustomModelSlugs(
   models: Iterable<string | null | undefined>,
@@ -138,7 +155,7 @@ export function getAppModelOptions(
     seen.add(slug);
     options.push({
       slug,
-      name: slug,
+      name: formatAppModelOptionName(provider, slug),
       isCustom: true,
     });
   }
@@ -154,7 +171,7 @@ export function getAppModelOptions(
   ) {
     options.push({
       slug: normalizedSelectedModel,
-      name: normalizedSelectedModel,
+      name: formatAppModelOptionName(provider, normalizedSelectedModel),
       isCustom: true,
     });
   }
@@ -200,6 +217,12 @@ export function getCustomModelOptionsByProvider(
       providers,
       "claudeAgent",
       selectedProvider === "claudeAgent" ? selectedModel : undefined,
+    ),
+    gemini: getAppModelOptions(
+      settings,
+      providers,
+      "gemini",
+      selectedProvider === "gemini" ? selectedModel : undefined,
     ),
     cursor: getAppModelOptions(
       settings,

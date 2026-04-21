@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { ServerProviderModel } from "@t3tools/contracts";
+import type { DraftId } from "../../composerDraftStore";
 import {
   getComposerProviderControls,
   getComposerProviderState,
@@ -111,6 +112,39 @@ const CLAUDE_MODELS_WITH_CONTEXT_WINDOW: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const GEMINI_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "auto-gemini-3",
+    name: "Auto (Gemini 3)",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [
+        { value: "HIGH", label: "High", isDefault: true },
+        { value: "LOW", label: "Low" },
+      ],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  },
+  {
+    slug: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [
+        { value: "-1", label: "Dynamic", isDefault: true },
+        { value: "512", label: "512 Tokens" },
+      ],
+      supportsFastMode: false,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  },
+];
+
 const OPENCODE_MODELS: ReadonlyArray<ServerProviderModel> = [
   {
     slug: "openai/gpt-5",
@@ -134,6 +168,28 @@ const OPENCODE_MODELS: ReadonlyArray<ServerProviderModel> = [
   },
 ];
 
+const FAST_MODE_ONLY_MODELS: ReadonlyArray<ServerProviderModel> = [
+  {
+    slug: "gpt-fast-only",
+    name: "GPT Fast Only",
+    isCustom: false,
+    capabilities: {
+      reasoningEffortLevels: [],
+      supportsFastMode: true,
+      supportsThinkingToggle: false,
+      contextWindowOptions: [],
+      promptInjectedEffortLevels: [],
+    },
+  },
+];
+
+const EMPTY_CAPABILITIES = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+} as const;
 describe("getComposerProviderState", () => {
   it("returns codex defaults when no codex draft options exist", () => {
     const state = getComposerProviderState({
@@ -445,6 +501,71 @@ describe("getComposerProviderState", () => {
     expect(state.modelOptionsForDispatch).not.toHaveProperty("fastMode");
   });
 
+  it("returns Gemini default thinking controls for Gemini 3 models", () => {
+    const state = getComposerProviderState({
+      provider: "gemini",
+      model: "auto-gemini-3",
+      models: GEMINI_MODELS,
+      prompt: "",
+      modelOptions: undefined,
+    });
+
+    expect(state).toEqual({
+      provider: "gemini",
+      promptEffort: "HIGH",
+      modelOptionsForDispatch: {
+        thinkingLevel: "HIGH",
+      },
+    });
+  });
+
+  it("normalizes Gemini 2.5 thinking controls to thinkingBudget values", () => {
+    const state = getComposerProviderState({
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      models: GEMINI_MODELS,
+      prompt: "",
+      modelOptions: {
+        gemini: {
+          thinkingBudget: 0,
+        },
+      },
+    });
+
+    expect(state).toEqual({
+      provider: "gemini",
+      promptEffort: "-1",
+      modelOptionsForDispatch: {
+        thinkingBudget: -1,
+      },
+    });
+  });
+
+  it("infers Gemini 3 thinking controls even when the provider snapshot lacks capabilities", () => {
+    const state = getComposerProviderState({
+      provider: "gemini",
+      model: "gemini-3.1-pro-preview",
+      models: [
+        {
+          slug: "gemini-3.1-pro-preview",
+          name: "Gemini 3.1 Pro Preview",
+          isCustom: false,
+          capabilities: EMPTY_CAPABILITIES,
+        },
+      ],
+      prompt: "",
+      modelOptions: undefined,
+    });
+
+    expect(state).toEqual({
+      provider: "gemini",
+      promptEffort: "HIGH",
+      modelOptionsForDispatch: {
+        thinkingLevel: "HIGH",
+      },
+    });
+  });
+
   it("preserves OpenCode variant and agent options for dispatch", () => {
     const state = getComposerProviderState({
       provider: "opencode",
@@ -477,11 +598,14 @@ describe("getComposerProviderControls", () => {
     });
   });
 
-  it("keeps the interaction mode toggle for Codex and Claude", () => {
+  it("keeps the interaction mode toggle for Codex, Claude, and Gemini", () => {
     expect(getComposerProviderControls("codex")).toEqual({
       showInteractionModeToggle: true,
     });
     expect(getComposerProviderControls("claudeAgent")).toEqual({
+      showInteractionModeToggle: true,
+    });
+    expect(getComposerProviderControls("gemini")).toEqual({
       showInteractionModeToggle: true,
     });
   });
@@ -512,5 +636,42 @@ describe("provider traits render guards", () => {
     });
 
     expect(content).toBeNull();
+  });
+
+  it("returns null for Gemini traits picker when the selected model has no visible traits", () => {
+    const content = renderProviderTraitsPicker({
+      provider: "gemini",
+      draftId: "draft_123" as DraftId,
+      model: "custom-gemini-model",
+      models: [
+        {
+          slug: "custom-gemini-model",
+          name: "Custom Gemini Model",
+          isCustom: true,
+          capabilities: EMPTY_CAPABILITIES,
+        },
+      ],
+      modelOptions: undefined,
+      prompt: "",
+      onPromptChange: () => {},
+    });
+
+    expect(content).toBeNull();
+  });
+
+  it("renders codex traits picker when fast mode is the only visible trait", () => {
+    const content = renderProviderTraitsPicker({
+      provider: "codex",
+      draftId: "draft_fast_mode_only" as DraftId,
+      model: "gpt-fast-only",
+      models: FAST_MODE_ONLY_MODELS,
+      modelOptions: {
+        fastMode: true,
+      },
+      prompt: "",
+      onPromptChange: () => {},
+    });
+
+    expect(content).not.toBeNull();
   });
 });

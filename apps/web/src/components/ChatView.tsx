@@ -117,7 +117,7 @@ import {
 import { newCommandId, newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
 import { useSettings } from "../hooks/useSettings";
-import { resolveAppModelSelection } from "../modelSelection";
+import { buildModelSelection, resolveAppModelSelection } from "../modelSelection";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { deriveLogicalProjectKeyFromSettings } from "../logicalProject";
 import {
@@ -1632,12 +1632,25 @@ export default function ChatView(props: ChatViewProps) {
 
   const focusComposer = useCallback(() => {
     composerRef.current?.focusAtEnd();
-  }, []);
+  }, [composerRef]);
   const scheduleComposerFocus = useCallback(() => {
     window.requestAnimationFrame(() => {
       focusComposer();
     });
   }, [focusComposer]);
+  const addTerminalContextToDraft = useCallback(
+    (selection: TerminalContextSelection) => {
+      composerRef.current?.addTerminalContext(selection);
+    },
+    [composerRef],
+  );
+  const setTerminalOpen = useCallback(
+    (open: boolean) => {
+      if (!activeThreadRef) return;
+      storeSetTerminalOpen(activeThreadRef, open);
+    },
+    [activeThreadRef, storeSetTerminalOpen],
+  );
   const terminalDrawerOpen = terminalState.terminalOpen;
   const toggleTerminalVisibility = useCallback(() => {
     if (!activeThreadRef) return;
@@ -2399,6 +2412,7 @@ export default function ChatView(props: ChatViewProps) {
     storeSetTerminalOpen,
     terminalDrawerOpen,
     toggleTerminalVisibility,
+    composerRef,
   ]);
 
   const onRevertToTurnCount = useCallback(
@@ -2854,7 +2868,7 @@ export default function ChatView(props: ChatViewProps) {
       promptRef.current = "";
       composerRef.current?.resetCursorState({ cursor: 0 });
     },
-    [activePendingProgress?.activeQuestion, activePendingUserInput],
+    [activePendingProgress?.activeQuestion, activePendingUserInput, composerRef],
   );
 
   const onChangeActivePendingUserInputCustomAnswer = useCallback(
@@ -2888,7 +2902,7 @@ export default function ChatView(props: ChatViewProps) {
         composerRef.current?.focusAt(nextCursor);
       }
     },
-    [activePendingUserInput],
+    [activePendingUserInput, composerRef],
   );
 
   const onAdvanceActivePendingUserInput = useCallback(() => {
@@ -3059,6 +3073,7 @@ export default function ChatView(props: ChatViewProps) {
       setComposerDraftInteractionMode,
       setThreadError,
       environmentId,
+      composerRef,
     ],
   );
 
@@ -3189,6 +3204,7 @@ export default function ChatView(props: ChatViewProps) {
     resetLocalDispatch,
     runtimeMode,
     environmentId,
+    composerRef,
   ]);
 
   const onProviderModelSelect = useCallback(
@@ -3205,10 +3221,10 @@ export default function ChatView(props: ChatViewProps) {
         providerStatuses,
         model,
       );
-      const nextModelSelection: ModelSelection = {
+      const nextModelSelection = buildModelSelection({
         provider: resolvedProvider,
         model: resolvedModel,
-      };
+      });
       setComposerDraftModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,

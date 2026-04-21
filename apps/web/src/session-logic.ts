@@ -34,6 +34,7 @@ export const PROVIDER_OPTIONS: Array<{
   { value: "codex", label: "Codex", available: true },
   { value: "copilot", label: "GitHub Copilot", available: true },
   { value: "claudeAgent", label: "Claude", available: true },
+  { value: "gemini", label: "Gemini", available: true },
   { value: "opencode", label: "OpenCode", available: true, pickerSidebarBadge: "new" },
   { value: "cursor", label: "Cursor", available: true, pickerSidebarBadge: "new" },
 ];

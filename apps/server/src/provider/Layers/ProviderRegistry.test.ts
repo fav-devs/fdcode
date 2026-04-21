@@ -525,7 +525,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
 
               assert.deepStrictEqual(
                 providers.map((provider) => provider.provider),
-                ["codex", "copilot", "claudeAgent", "opencode", "cursor"],
+                ["codex", "copilot", "claudeAgent", "gemini", "opencode", "cursor"],
               );
               assert.strictEqual(cursorProvider?.enabled, false);
               assert.strictEqual(cursorProvider?.status, "disabled");

@@ -126,13 +126,19 @@ describe("serverSettings helpers", () => {
     expect(
       applyServerSettingsPatch(current, {
         textGenerationModelSelection: {
-          provider: "opencode",
-          model: "openai/gpt-5",
+          provider: "gemini",
+          model: "gemini-2.5-flash",
+          options: {
+            thinkingBudget: 0,
+          },
         },
       }).textGenerationModelSelection,
     ).toEqual({
-      provider: "opencode",
-      model: "openai/gpt-5",
+      provider: "gemini",
+      model: "gemini-2.5-flash",
+      options: {
+        thinkingBudget: 0,
+      },
     });
   });
 

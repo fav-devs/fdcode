@@ -4,6 +4,7 @@ import {
   CopilotModelOptions,
   CodexModelOptions,
   CursorModelOptions,
+  GeminiModelOptions,
   OpenCodeModelOptions,
 } from "./model.ts";
 import { RepositoryIdentity } from "./environment.ts";
@@ -37,6 +38,7 @@ export const ProviderKind = Schema.Literals([
   "copilot",
   "claudeAgent",
   "cursor",
+  "gemini",
   "opencode",
 ]);
 export type ProviderKind = typeof ProviderKind.Type;
@@ -82,6 +84,12 @@ export const CursorModelSelection = Schema.Struct({
   options: Schema.optionalKey(CursorModelOptions),
 });
 export type CursorModelSelection = typeof CursorModelSelection.Type;
+export const GeminiModelSelection = Schema.Struct({
+  provider: Schema.Literal("gemini"),
+  model: TrimmedNonEmptyString,
+  options: Schema.optionalKey(GeminiModelOptions),
+});
+export type GeminiModelSelection = typeof GeminiModelSelection.Type;
 export const OpenCodeModelSelection = Schema.Struct({
   provider: Schema.Literal("opencode"),
   model: TrimmedNonEmptyString,
@@ -94,6 +102,7 @@ export const ModelSelection = Schema.Union([
   CopilotModelSelection,
   ClaudeModelSelection,
   CursorModelSelection,
+  GeminiModelSelection,
   OpenCodeModelSelection,
 ]);
 export type ModelSelection = typeof ModelSelection.Type;

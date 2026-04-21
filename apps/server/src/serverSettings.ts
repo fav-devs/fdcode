@@ -109,6 +109,7 @@ const PROVIDER_ORDER: readonly ProviderKind[] = [
   "codex",
   "copilot",
   "claudeAgent",
+  "gemini",
   "opencode",
   "cursor",
 ];

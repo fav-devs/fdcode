@@ -6,6 +6,9 @@ import {
   type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
+  type GeminiThinkingBudget,
+  type GeminiThinkingLevel,
+  type GeminiModelOptions,
   type ModelCapabilities,
   type ModelSelection,
   type OpenCodeModelOptions,
@@ -16,6 +19,191 @@ import {
 export interface SelectableModelOption {
   slug: string;
   name: string;
+}
+
+export type GeminiThinkingConfigKind = "budget" | "level";
+
+const GEMINI_3_MODEL_PATTERN = /^(?:auto-)?gemini-3(?:[.-]|$)/i;
+const GEMINI_2_5_MODEL_PATTERN = /^(?:auto-)?gemini-2\.5(?:[.-]|$)/i;
+const GEMINI_THINKING_LEVEL_SET = new Set<GeminiThinkingLevel>(["LOW", "HIGH"]);
+const GEMINI_THINKING_BUDGET_MAP = new Map<string, GeminiThinkingBudget>([
+  ["-1", -1],
+  ["0", 0],
+  ["512", 512],
+]);
+
+export const EMPTY_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+export const DEFAULT_GEMINI_MODEL_CAPABILITIES: ModelCapabilities = EMPTY_MODEL_CAPABILITIES;
+
+export const GEMINI_3_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "HIGH", label: "High", isDefault: true },
+    { value: "LOW", label: "Low" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+export const GEMINI_2_5_MODEL_CAPABILITIES: ModelCapabilities = {
+  reasoningEffortLevels: [
+    { value: "-1", label: "Dynamic", isDefault: true },
+    { value: "512", label: "512 Tokens" },
+  ],
+  supportsFastMode: false,
+  supportsThinkingToggle: false,
+  contextWindowOptions: [],
+  promptInjectedEffortLevels: [],
+};
+
+function isGeminiThinkingLevel(value: string): value is GeminiThinkingLevel {
+  return GEMINI_THINKING_LEVEL_SET.has(value as GeminiThinkingLevel);
+}
+
+function isGeminiThinkingBudget(value: string): value is `${GeminiThinkingBudget}` {
+  return GEMINI_THINKING_BUDGET_MAP.has(value);
+}
+
+function sanitizeGeminiAliasSegment(value: string): string {
+  const sanitized = value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "model";
+}
+
+export function getGeminiThinkingConfigKind(
+  model: string | null | undefined,
+): GeminiThinkingConfigKind | null {
+  const trimmed = trimOrNull(model);
+  if (!trimmed) {
+    return null;
+  }
+  if (GEMINI_3_MODEL_PATTERN.test(trimmed)) {
+    return "level";
+  }
+  if (GEMINI_2_5_MODEL_PATTERN.test(trimmed)) {
+    return "budget";
+  }
+  return null;
+}
+
+export function geminiCapabilitiesForModel(
+  modelId: string | null | undefined,
+  fallbackCapabilities: ModelCapabilities = DEFAULT_GEMINI_MODEL_CAPABILITIES,
+): ModelCapabilities {
+  const trimmed = trimOrNull(modelId)?.toLowerCase();
+  switch (getGeminiThinkingConfigKind(modelId)) {
+    case "level":
+      return GEMINI_3_MODEL_CAPABILITIES;
+    case "budget":
+      if (!trimmed) {
+        return fallbackCapabilities;
+      }
+      return GEMINI_2_5_MODEL_CAPABILITIES;
+    default:
+      return fallbackCapabilities;
+  }
+}
+
+export function getGeminiThinkingSelectionValue(
+  caps: ModelCapabilities,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string | null {
+  const candidates = [
+    trimOrNull(modelOptions?.thinkingLevel),
+    modelOptions?.thinkingBudget !== undefined ? String(modelOptions.thinkingBudget) : null,
+  ];
+
+  return (
+    candidates.find(
+      (candidate): candidate is string => !!candidate && hasEffortLevel(caps, candidate),
+    ) ??
+    candidates.find((candidate): candidate is string => !!candidate) ??
+    null
+  );
+}
+
+export function geminiModelOptionsFromEffortValue(
+  value: string | null | undefined,
+): GeminiModelOptions | undefined {
+  const trimmed = trimOrNull(value);
+  if (!trimmed) {
+    return undefined;
+  }
+  if (isGeminiThinkingLevel(trimmed)) {
+    return { thinkingLevel: trimmed };
+  }
+  if (isGeminiThinkingBudget(trimmed)) {
+    return {
+      thinkingBudget: GEMINI_THINKING_BUDGET_MAP.get(trimmed) as GeminiThinkingBudget,
+    };
+  }
+  return undefined;
+}
+
+export function mergeGeminiModelOptions(
+  modelOptions: GeminiModelOptions | null | undefined,
+  patch: GeminiModelOptions,
+): GeminiModelOptions {
+  if (patch.thinkingLevel !== undefined) {
+    const { thinkingBudget: _thinkingBudget, ...rest } = modelOptions ?? {};
+    return { ...rest, ...patch };
+  }
+  if (patch.thinkingBudget !== undefined) {
+    const { thinkingLevel: _thinkingLevel, ...rest } = modelOptions ?? {};
+    return { ...rest, ...patch };
+  }
+
+  return { ...modelOptions, ...patch };
+}
+
+export function getGeminiThinkingModelAlias(
+  model: string,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string | null {
+  const kind = getGeminiThinkingConfigKind(model);
+  if (!kind || !modelOptions) {
+    return null;
+  }
+
+  const caps = geminiCapabilitiesForModel(model);
+  const effort = getGeminiThinkingSelectionValue(caps, modelOptions);
+  if (!effort || !hasEffortLevel(caps, effort)) {
+    return null;
+  }
+
+  const nextOptions = geminiModelOptionsFromEffortValue(effort);
+  if (!nextOptions) {
+    return null;
+  }
+
+  const base = sanitizeGeminiAliasSegment(model);
+  if (kind === "level" && nextOptions.thinkingLevel) {
+    return `t3code-gemini-${base}-thinking-level-${nextOptions.thinkingLevel.toLowerCase()}`;
+  }
+  if (kind === "budget" && nextOptions.thinkingBudget !== undefined) {
+    const budget =
+      nextOptions.thinkingBudget === -1 ? "dynamic" : String(nextOptions.thinkingBudget);
+    return `t3code-gemini-${base}-thinking-budget-${budget}`;
+  }
+  return null;
+}
+
+export function resolveGeminiApiModelId(
+  model: string,
+  modelOptions: GeminiModelOptions | null | undefined,
+): string {
+  return getGeminiThinkingModelAlias(model, modelOptions) ?? model;
 }
 
 /** Check whether a capabilities object includes a given effort value. */
@@ -136,6 +324,14 @@ export function normalizeCursorModelOptionsWithCapabilities(
   return Object.keys(nextOptions).length > 0 ? nextOptions : undefined;
 }
 
+export function normalizeGeminiModelOptionsWithCapabilities(
+  caps: ModelCapabilities,
+  modelOptions: GeminiModelOptions | null | undefined,
+): GeminiModelOptions | undefined {
+  const effort = resolveEffort(caps, getGeminiThinkingSelectionValue(caps, modelOptions));
+  return geminiModelOptionsFromEffortValue(effort);
+}
+
 function resolveLabeledOption(
   options: ReadonlyArray<{ value: string; isDefault?: boolean | undefined }> | undefined,
   raw: string | null | undefined,
@@ -179,6 +375,8 @@ export function normalizeProviderModelOptionsWithCapabilities(
       return normalizeClaudeModelOptionsWithCapabilities(caps, modelOptions as ClaudeModelOptions);
     case "cursor":
       return normalizeCursorModelOptionsWithCapabilities(caps, modelOptions as CursorModelOptions);
+    case "gemini":
+      return normalizeGeminiModelOptionsWithCapabilities(caps, modelOptions as GeminiModelOptions);
     case "opencode":
       return normalizeOpenCodeModelOptionsWithCapabilities(
         caps,
@@ -296,12 +494,37 @@ export function createModelSelection(
         model,
         ...(options ? { options: options as CursorModelOptions } : {}),
       };
+    case "gemini":
+      return {
+        provider,
+        model,
+        ...(options ? { options: options as GeminiModelOptions } : {}),
+      };
     case "opencode":
       return {
         provider,
         model,
         ...(options ? { options: options as OpenCodeModelOptions } : {}),
       };
+  }
+}
+
+export function resolveApiModelId(modelSelection: ModelSelection): string {
+  switch (modelSelection.provider) {
+    case "claudeAgent": {
+      switch (modelSelection.options?.contextWindow) {
+        case "1m":
+          return `${modelSelection.model}[1m]`;
+        default:
+          return modelSelection.model;
+      }
+    }
+    case "gemini": {
+      return resolveGeminiApiModelId(modelSelection.model, modelSelection.options);
+    }
+    default: {
+      return modelSelection.model;
+    }
   }
 }
 

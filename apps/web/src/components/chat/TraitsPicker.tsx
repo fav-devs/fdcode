@@ -3,6 +3,7 @@ import {
   type CopilotModelOptions,
   type CodexModelOptions,
   type CursorModelOptions,
+  type GeminiModelOptions,
   type OpenCodeModelOptions,
   type ProviderKind,
   type ProviderModelOptions,
@@ -11,12 +12,15 @@ import {
 } from "@t3tools/contracts";
 import {
   applyClaudePromptEffortPrefix,
+  geminiModelOptionsFromEffortValue,
   isClaudeUltrathinkPrompt,
-  trimOrNull,
-  getDefaultEffort,
   getDefaultContextWindow,
+  getDefaultEffort,
+  getGeminiThinkingSelectionValue,
   hasContextWindowOption,
+  mergeGeminiModelOptions,
   resolveEffort,
+  trimOrNull,
 } from "@t3tools/shared/model";
 import { memo, useCallback, useState } from "react";
 import type { VariantProps } from "class-variance-authority";
@@ -57,6 +61,7 @@ const ULTRATHINK_PROMPT_PREFIX = "Ultrathink:\n";
 
 function getRawEffort(
   provider: ProviderKind,
+  caps: ReturnType<typeof getProviderModelCapabilities>,
   modelOptions: ProviderOptions | null | undefined,
 ): string | null {
   if (provider === "codex") {
@@ -64,6 +69,9 @@ function getRawEffort(
   }
   if (provider === "copilot") {
     return trimOrNull((modelOptions as CopilotModelOptions | undefined)?.reasoningEffort);
+  }
+  if (provider === "gemini") {
+    return getGeminiThinkingSelectionValue(caps, modelOptions as GeminiModelOptions | undefined);
   }
   if (provider === "cursor") {
     return trimOrNull((modelOptions as CursorModelOptions | undefined)?.reasoning);
@@ -136,7 +144,7 @@ function getSelectedTraits(
           );
 
   // Resolve effort from options (provider-specific key)
-  const rawEffort = getRawEffort(provider, modelOptions);
+  const rawEffort = getRawEffort(provider, caps, modelOptions);
   const effort =
     provider === "opencode"
       ? (resolveNamedOption(effortLevels, rawEffort)?.value ?? null)
@@ -335,6 +343,19 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         const stripped = prompt.replace(/^Ultrathink:\s*/i, "");
         onPromptChange(stripped);
       }
+      if (provider === "gemini") {
+        const nextGeminiOptions = geminiModelOptionsFromEffortValue(nextOption.value);
+        if (!nextGeminiOptions) {
+          return;
+        }
+        updateModelOptions(
+          mergeGeminiModelOptions(
+            modelOptions as GeminiModelOptions | null | undefined,
+            nextGeminiOptions,
+          ),
+        );
+        return;
+      }
       const effortKey = getEffortKey(provider);
       updateModelOptions(
         buildNextOptions(provider, modelOptions, { [effortKey]: nextOption.value }),
@@ -363,7 +384,7 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
         <>
           <MenuGroup>
             <div className="px-2 pt-1.5 pb-1 font-medium text-muted-foreground text-xs">
-              {provider === "opencode" ? "Variant" : "Effort"}
+              {provider === "gemini" ? "Thinking" : provider === "opencode" ? "Variant" : "Effort"}
             </div>
             {ultrathinkInBodyText ? (
               <div className="px-2 pb-1.5 text-muted-foreground/80 text-xs">

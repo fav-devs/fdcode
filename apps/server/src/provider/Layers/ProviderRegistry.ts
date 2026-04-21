@@ -11,11 +11,13 @@ import { ClaudeProviderLive } from "./ClaudeProvider.ts";
 import { CopilotProviderLive } from "./CopilotProvider.ts";
 import { CodexProviderLive } from "./CodexProvider.ts";
 import { CursorProviderLive } from "./CursorProvider.ts";
+import { GeminiProviderLive } from "./GeminiProvider.ts";
 import { OpenCodeProviderLive } from "./OpenCodeProvider.ts";
 import { ClaudeProvider } from "../Services/ClaudeProvider.ts";
 import { CopilotProvider } from "../Services/CopilotProvider.ts";
 import { CodexProvider } from "../Services/CodexProvider.ts";
 import { CursorProvider } from "../Services/CursorProvider.ts";
+import { GeminiProvider } from "../Services/GeminiProvider.ts";
 import { OpenCodeProvider } from "../Services/OpenCodeProvider.ts";
 import { ProviderRegistry, type ProviderRegistryShape } from "../Services/ProviderRegistry.ts";
 import { OpenCodeRuntimeLive } from "../opencodeRuntime.ts";
@@ -94,6 +96,7 @@ const ProviderRegistryLiveBase = Layer.effect(
     const codexProvider = yield* CodexProvider;
     const copilotProvider = yield* CopilotProvider;
     const claudeProvider = yield* ClaudeProvider;
+    const geminiProvider = yield* GeminiProvider;
     const openCodeProvider = yield* OpenCodeProvider;
     const config = yield* ServerConfig;
     const fileSystem = yield* FileSystem.FileSystem;
@@ -119,6 +122,12 @@ const ProviderRegistryLiveBase = Layer.effect(
         getSnapshot: claudeProvider.getSnapshot,
         refresh: claudeProvider.refresh,
         streamChanges: claudeProvider.streamChanges,
+      },
+      {
+        provider: "gemini",
+        getSnapshot: geminiProvider.getSnapshot,
+        refresh: geminiProvider.refresh,
+        streamChanges: geminiProvider.streamChanges,
       },
       {
         provider: "opencode",
@@ -297,6 +306,7 @@ export const ProviderRegistryLive = Layer.unwrap(
       Layer.provideMerge(CodexProviderLive),
       Layer.provideMerge(CopilotProviderLive),
       Layer.provideMerge(ClaudeProviderLive),
+      Layer.provideMerge(GeminiProviderLive),
       Layer.provideMerge(OpenCodeProviderLive),
       Layer.provideMerge(OpenCodeRuntimeLive),
     ),

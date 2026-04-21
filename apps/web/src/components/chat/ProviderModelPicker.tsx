@@ -12,7 +12,7 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { cn } from "~/lib/utils";
 import { ModelPickerContent } from "./ModelPickerContent";
 import {
-  ModelEsque,
+  type ModelEsque,
   PROVIDER_ICON_BY_PROVIDER,
   getTriggerDisplayModelLabel,
   getTriggerDisplayModelName,

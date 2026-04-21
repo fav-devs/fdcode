@@ -107,6 +107,9 @@ export function providerModelsFromSettings(
   provider: ServerProvider["provider"],
   customModels: ReadonlyArray<string>,
   customModelCapabilities: ModelCapabilities,
+  options?: {
+    readonly formatCustomModelName?: (slug: string) => string;
+  },
 ): ReadonlyArray<ServerProviderModel> {
   const resolvedBuiltInModels = [...builtInModels];
   const seen = new Set(resolvedBuiltInModels.map((model) => model.slug));
@@ -120,7 +123,7 @@ export function providerModelsFromSettings(
     seen.add(normalized);
     customEntries.push({
       slug: normalized,
-      name: normalized,
+      name: options?.formatCustomModelName?.(normalized) ?? normalized,
       isCustom: true,
       capabilities: customModelCapabilities,
     });
