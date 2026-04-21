@@ -211,6 +211,7 @@ function toShellSnapshot(snapshot: OrchestrationReadModel) {
       hasPendingApprovals: false,
       hasPendingUserInput: false,
       hasActionableProposedPlan: false,
+      agentCommandStatus: null,
     })),
     updatedAt: snapshot.updatedAt,
   };

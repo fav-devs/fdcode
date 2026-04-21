@@ -28,6 +28,12 @@ import type {
   ProjectWriteFileResult,
 } from "./project.ts";
 import type {
+  LocalProcessProbePortsInput,
+  LocalProcessProbePortsResult,
+  LocalProcessStopPortsInput,
+  LocalProcessStopPortsResult,
+} from "./localProcess.ts";
+import type {
   ServerConfig,
   ServerProviderUpdatedPayload,
   ServerUpsertKeybindingResult,
@@ -289,6 +295,10 @@ export interface EnvironmentApi {
         onResubscribe?: () => void;
       },
     ) => () => void;
+  };
+  localProcesses?: {
+    stopPorts: (input: LocalProcessStopPortsInput) => Promise<LocalProcessStopPortsResult>;
+    probePorts: (input: LocalProcessProbePortsInput) => Promise<LocalProcessProbePortsResult>;
   };
   projects: {
     searchEntries: (input: ProjectSearchEntriesInput) => Promise<ProjectSearchEntriesResult>;

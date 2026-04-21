@@ -15,4 +15,5 @@ export * from "./editor.ts";
 export * from "./project.ts";
 export * from "./filesystem.ts";
 export * from "./ports.ts";
+export * from "./localProcess.ts";
 export * from "./rpc.ts";
