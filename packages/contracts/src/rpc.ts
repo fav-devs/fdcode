@@ -72,6 +72,7 @@ import {
 import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
+  TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
   TerminalEvent,
