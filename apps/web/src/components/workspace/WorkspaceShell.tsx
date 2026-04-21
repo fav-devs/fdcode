@@ -21,7 +21,7 @@ import {
 } from "../../store";
 import { cn, newDraftId, newThreadId } from "../../lib/utils";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
-import { SidebarHeaderTrigger, SidebarInset } from "../ui/sidebar";
+import { Sidebar, SidebarHeaderTrigger, SidebarInset, SidebarProvider, SidebarRail } from "../ui/sidebar";
 import { ClaudeAI, Gemini, OpenAI } from "../Icons";
 import ChatView from "../ChatView";
 import { useComposerDraftStore } from "../../composerDraftStore";
@@ -64,7 +64,6 @@ import {
 } from "../../session-logic";
 import { ThreadRightPanel, type ThreadRightPanelKind } from "../ThreadRightPanel";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
-import { RightPanelSheet } from "../RightPanelSheet";
 
 const WORKSPACE_MIN_PANE_SIZE_PX = 220;
 const WORKSPACE_DROP_EDGE_THRESHOLD = 0.22;
@@ -327,15 +326,11 @@ export function WorkspaceShell() {
   const rootNodeId = useWorkspaceRootNodeId();
 
   return (
-    <SidebarInset
-      className="h-[calc(100dvh-1rem)] md:h-[calc(100dvh-1.5rem)] min-h-0 overflow-hidden overscroll-y-none bg-transparent text-foreground md:peer-data-[variant=inset]:bg-transparent"
-      surfaceClassName="bg-transparent"
-    >
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent">
+    <div className="relative flex h-[calc(100dvh-0.25rem)] md:h-[calc(100dvh-1.0rem)] min-h-0 min-w-0 w-full flex-1 flex-col overflow-hidden overscroll-y-none bg-transparent text-foreground">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-transparent ">
         {rootNodeId ? <WorkspaceLayoutRoot /> : <WorkspaceRouteFallback />}
       </div>
-      <AppStatusBar />
-    </SidebarInset>
+    </div>
   );
 }
 
@@ -410,6 +405,129 @@ function WorkspaceRouteFallback() {
   );
 }
 
+function resolveWorkspaceSurfaceThreadRef(
+  surface: WorkspaceSurfaceInstance | null | undefined,
+): ScopedThreadRef | null {
+  if (!surface) {
+    return null;
+  }
+
+  if (surface.kind === "thread" && surface.input.scope === "server") {
+    return surface.input.threadRef;
+  }
+
+  if (surface.kind === "terminal") {
+    return surface.input.threadRef;
+  }
+
+  return null;
+}
+
+function useWorkspaceRightPanelRouting(activeServerThreadRef: ScopedThreadRef | null) {
+  const navigate = useNavigate();
+  const routeTarget = useParams({
+    strict: false,
+    select: (params) => resolveThreadRouteTarget(params),
+  });
+  const routePanelSearch = useSearch({
+    strict: false,
+    select: (search) => parseThreadRouteSearch(search),
+  });
+
+  const panelOpen =
+    activeServerThreadRef !== null &&
+    routeTarget?.kind === "server" &&
+    routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
+    routeTarget.threadRef.threadId === activeServerThreadRef.threadId &&
+    (routePanelSearch.diff === "1" ||
+      routePanelSearch.files === "1" ||
+      routePanelSearch.ports === "1" ||
+      routePanelSearch.plan === "1");
+
+  const activeRightPanel: ThreadRightPanelKind | null =
+    panelOpen && routePanelSearch.diff === "1"
+      ? "diff"
+      : panelOpen && routePanelSearch.files === "1"
+        ? "files"
+        : panelOpen && routePanelSearch.ports === "1"
+          ? "ports"
+          : panelOpen && routePanelSearch.plan === "1"
+            ? "plan"
+            : null;
+
+  const handleToggleRightPanel = useCallback(() => {
+    if (!activeServerThreadRef) {
+      return;
+    }
+
+    const threadKey = scopedThreadKey(activeServerThreadRef);
+    const persisted = useSingleChatPanelStore.getState().panelStateByThreadKey[threadKey];
+    const panelState = persisted ?? createDefaultSingleChatPanelState();
+    const panelToOpen = panelState.hasOpenedPanel ? panelState.lastOpenPanel : "diff";
+
+    void navigate({
+      to: "/$environmentId/$threadId",
+      params: buildThreadRouteParams(activeServerThreadRef),
+      search: (previous: Record<string, unknown>) => {
+        const rest = stripThreadPanelSearchParams(previous);
+        const isCurrentRouteThread =
+          routeTarget?.kind === "server" &&
+          routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
+          routeTarget.threadRef.threadId === activeServerThreadRef.threadId;
+
+        if (isCurrentRouteThread && panelOpen) {
+          return rest;
+        }
+
+        if (panelToOpen === "files") {
+          return { ...rest, files: "1" as const };
+        }
+        if (panelToOpen === "ports") {
+          return { ...rest, ports: "1" as const };
+        }
+        if (panelToOpen === "plan") {
+          return { ...rest, plan: "1" as const };
+        }
+        return { ...rest, diff: "1" as const };
+      },
+    });
+  }, [activeServerThreadRef, navigate, panelOpen, routeTarget]);
+
+  const handleSelectRightPanel = useCallback(
+    (panel: ThreadRightPanelKind) => {
+      if (!activeServerThreadRef) {
+        return;
+      }
+
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: buildThreadRouteParams(activeServerThreadRef),
+        search: (previous: Record<string, unknown>) => {
+          const rest = stripThreadPanelSearchParams(previous);
+          if (panel === "files") {
+            return { ...rest, files: "1" as const };
+          }
+          if (panel === "ports") {
+            return { ...rest, ports: "1" as const };
+          }
+          if (panel === "plan") {
+            return { ...rest, plan: "1" as const };
+          }
+          return { ...rest, diff: "1" as const };
+        },
+      });
+    },
+    [activeServerThreadRef, navigate],
+  );
+
+  return {
+    activeRightPanel,
+    handleSelectRightPanel,
+    handleToggleRightPanel,
+    panelOpen,
+  };
+}
+
 function WorkspaceLayoutRoot() {
   const rootNodeId = useWorkspaceRootNodeId();
   const focusedWindowId = useWorkspaceFocusedWindowId();
@@ -418,44 +536,90 @@ function WorkspaceLayoutRoot() {
   const zoomedWindowId = useWorkspaceZoomedWindowId();
   const setMobileActiveWindow = useWorkspaceStore((state) => state.setMobileActiveWindow);
   const isDesktopViewport = useMediaQuery("md");
+  const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const activeWindowId =
     zoomedWindowId ?? mobileActiveWindowId ?? focusedWindowId ?? windowIds[0] ?? null;
+  const activeWindowSurface = useWorkspaceWindowActiveSurface(activeWindowId);
+  const activeServerThreadRef = resolveWorkspaceSurfaceThreadRef(activeWindowSurface);
+  const { activeRightPanel, handleSelectRightPanel, handleToggleRightPanel, panelOpen } =
+    useWorkspaceRightPanelRouting(activeServerThreadRef);
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      {windowIds.length > 1 ? (
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
-          {windowIds.map((windowId, index) => {
-            const isActive = (mobileActiveWindowId ?? focusedWindowId ?? windowIds[0]) === windowId;
-            return (
-              <button
-                key={windowId}
-                type="button"
-                className={cn(
-                  "rounded-md border px-2 py-1 text-xs",
-                  isActive
-                    ? "border-border bg-accent text-foreground"
-                    : "border-border/60 text-muted-foreground",
-                )}
-                onClick={() => setMobileActiveWindow(windowId)}
-              >
-                Window {index + 1}
-              </button>
-            );
-          })}
+    <div className="flex min-h-0 flex-1 flex-col">
+    <SidebarProvider
+      open={panelOpen}
+      onOpenChange={(open) => {
+        if (!open && panelOpen) {
+          handleToggleRightPanel();
+        }
+      }}
+      className="min-h-0 flex-1"
+    >
+      <SidebarInset className="min-h-0 flex-1 bg-transparent" surfaceClassName="bg-transparent">
+        <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
+          {windowIds.length > 1 ? (
+            <div className="flex items-center gap-2 border-b border-border px-3 py-2 md:hidden">
+              {windowIds.map((windowId, index) => {
+                const isActive =
+                  (mobileActiveWindowId ?? focusedWindowId ?? windowIds[0]) === windowId;
+                return (
+                  <button
+                    key={windowId}
+                    type="button"
+                    className={cn(
+                      "rounded-md border px-2 py-1 text-xs",
+                      isActive
+                        ? "border-border bg-accent text-foreground"
+                        : "border-border/60 text-muted-foreground",
+                    )}
+                    onClick={() => setMobileActiveWindow(windowId)}
+                  >
+                    Window {index + 1}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+          <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+            {isDesktopViewport ? (
+              zoomedWindowId ? (
+                <WorkspaceWindowView windowId={zoomedWindowId} scrollIntoViewOnFocus />
+              ) : (
+                <WorkspaceNodeView nodeId={rootNodeId} />
+              )
+            ) : (
+              <MobileWorkspaceWindow windowId={activeWindowId} />
+            )}
+          </div>
         </div>
+      </SidebarInset>
+      {isDesktopViewport &&
+      activeServerThreadRef &&
+      activeRightPanel &&
+      !shouldUseRightPanelSheet ? (
+        <Sidebar
+          side="right"
+          variant="floating"
+          className="top-3 bottom-7 h-auto z-30 pl-0 pr-2 py-2"
+          innerClassName="bg-background"
+          resizable={{
+            storageKey: "workspace_right_panel_width",
+            minWidth: 390,
+            maxWidth: 820,
+          }}
+        >
+          <SidebarRail />
+          <WorkspaceThreadRightPanelHost
+            threadRef={activeServerThreadRef}
+            panel={activeRightPanel}
+            mode="sidebar"
+            onClose={handleToggleRightPanel}
+            onSelectPanel={handleSelectRightPanel}
+          />
+        </Sidebar>
       ) : null}
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-        {isDesktopViewport ? (
-          zoomedWindowId ? (
-            <WorkspaceWindowView windowId={zoomedWindowId} scrollIntoViewOnFocus />
-          ) : (
-            <WorkspaceNodeView nodeId={rootNodeId} />
-          )
-        ) : (
-          <MobileWorkspaceWindow windowId={activeWindowId} />
-        )}
-      </div>
+    </SidebarProvider>
+    <AppStatusBar />
     </div>
   );
 }
@@ -919,7 +1083,7 @@ const WorkspaceLinearNodeView = memo(function WorkspaceLinearNodeView(props: {
     <div
       ref={containerRef}
       className={cn(
-        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden px-3 py-3 gap-0",
+        "flex h-full min-h-0 min-w-0 flex-1 overflow-hidden gap-0",
         props.axis === "x" ? "flex-row" : "flex-col",
       )}
     >
@@ -1127,49 +1291,16 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
   const placeSurface = useWorkspaceStore((state) => state.placeSurface);
   const placeThreadSurface = useWorkspaceStore((state) => state.placeThreadSurface);
   const splitWindowSurface = useWorkspaceStore((state) => state.splitWindowSurface);
-  const navigate = useNavigate();
-  const routeTarget = useParams({
-    strict: false,
-    select: (params) => resolveThreadRouteTarget(params),
-  });
-  const routePanelSearch = useSearch({
-    strict: false,
-    select: (search) => parseThreadRouteSearch(search),
-  });
-  const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const window = useWorkspaceWindow(props.windowId);
   const tabSurfaces = useWorkspaceWindowSurfaces(props.windowId);
   const activeSurface = useWorkspaceWindowActiveSurface(props.windowId);
   const focusedWindowId = useWorkspaceFocusedWindowId();
   const { canOpenNewChatTab, canOpenNewTerminalTab, openNewChatTab, openNewTerminalTab } =
     useWorkspaceWindowTabActions(props.windowId, activeSurface);
-  const activeServerThreadRef =
-    activeSurface?.kind === "thread" && activeSurface.input.scope === "server"
-      ? activeSurface.input.threadRef
-      : activeSurface?.kind === "terminal"
-        ? activeSurface.input.threadRef
-        : null;
+  const activeServerThreadRef = resolveWorkspaceSurfaceThreadRef(activeSurface);
   const panelToggleAvailable = activeServerThreadRef !== null;
-  const panelOpen =
-    panelToggleAvailable &&
-    routeTarget?.kind === "server" &&
-    activeServerThreadRef !== null &&
-    routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
-    routeTarget.threadRef.threadId === activeServerThreadRef.threadId &&
-    (routePanelSearch.diff === "1" ||
-      routePanelSearch.files === "1" ||
-      routePanelSearch.ports === "1" ||
-      routePanelSearch.plan === "1");
-  const activeRightPanel: ThreadRightPanelKind | null =
-    panelOpen && routePanelSearch.diff === "1"
-      ? "diff"
-      : panelOpen && routePanelSearch.files === "1"
-        ? "files"
-        : panelOpen && routePanelSearch.ports === "1"
-          ? "ports"
-          : panelOpen && routePanelSearch.plan === "1"
-            ? "plan"
-            : null;
+  const { panelOpen, handleToggleRightPanel } =
+    useWorkspaceRightPanelRouting(activeServerThreadRef);
   const isFocusedPane = focusedWindowId === props.windowId;
   const [isWindowDragActive, setIsWindowDragActive] = useState(false);
   const [threadActivationFocusRequestId, setThreadActivationFocusRequestId] = useState(0);
@@ -1355,44 +1486,6 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
     setHoveredDropTarget(null);
   }, []);
 
-  const handleToggleRightPanel = useCallback(() => {
-    if (!activeServerThreadRef) {
-      return;
-    }
-
-    const threadKey = scopedThreadKey(activeServerThreadRef);
-    const persisted = useSingleChatPanelStore.getState().panelStateByThreadKey[threadKey];
-    const panelState = persisted ?? createDefaultSingleChatPanelState();
-    const panelToOpen = panelState.hasOpenedPanel ? panelState.lastOpenPanel : "diff";
-
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: buildThreadRouteParams(activeServerThreadRef),
-      search: (previous: Record<string, unknown>) => {
-        const rest = stripThreadPanelSearchParams(previous);
-        const isCurrentRouteThread =
-          routeTarget?.kind === "server" &&
-          routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
-          routeTarget.threadRef.threadId === activeServerThreadRef.threadId;
-
-        if (isCurrentRouteThread && panelOpen) {
-          return rest;
-        }
-
-        if (panelToOpen === "files") {
-          return { ...rest, files: "1" as const };
-        }
-        if (panelToOpen === "ports") {
-          return { ...rest, ports: "1" as const };
-        }
-        if (panelToOpen === "plan") {
-          return { ...rest, plan: "1" as const };
-        }
-        return { ...rest, diff: "1" as const };
-      },
-    });
-  }, [activeServerThreadRef, navigate, panelOpen, routeTarget]);
-
   if (!window) {
     return null;
   }
@@ -1431,7 +1524,7 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
         }
       }}
     >
-      <div className="flex min-w-0 shrink-0 items-center gap-2 px-2 py-0.5">
+      <div className="drag-region flex min-w-0 shrink-0 items-center gap-2 px-2 py-0.5 wco:pl-[calc(env(titlebar-area-x)+1em)]">
         {isFocusedPane ? (
           <SidebarHeaderTrigger className="size-8 shrink-0 rounded-xl border border-border/60 bg-background/72 text-muted-foreground shadow-sm backdrop-blur hover:bg-accent hover:text-foreground" />
         ) : null}
@@ -1555,38 +1648,26 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
       <section
         ref={windowElementRef}
         className={cn(
-          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-transparent",
+          "relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-lg border border-border/70 bg-background",
           focusedWindowId === props.windowId ? "ring-1 ring-border/80" : "",
         )}
         onDragLeave={isPaperLayout ? undefined : handleWindowDragLeave}
         onDrop={isPaperLayout ? undefined : handleWindowDrop}
         onDragOver={isPaperLayout ? undefined : handleWindowDragOver}
       >
-        <div className="flex min-h-0 flex-1">
-          <div className="min-h-0 min-w-0 flex-1">
-            {activeSurface ? (
-              <WorkspaceSurfaceView
-                activationFocusRequestId={
-                  activeSurface.kind === "thread"
-                    ? threadActivationFocusRequestId
-                    : terminalActivationFocusRequestId
-                }
-                surface={activeSurface}
-                bindSharedComposerHandle={focusedWindowId === props.windowId}
-              />
-            ) : (
-              <WorkspaceWindowEmptyState windowId={props.windowId} />
-            )}
-          </div>
-          {activeServerThreadRef && activeRightPanel && !shouldUseRightPanelSheet ? (
-            <WorkspaceThreadRightPanelHost
-              threadRef={activeServerThreadRef}
-              panel={activeRightPanel}
-              mode="sidebar"
-              onClose={handleToggleRightPanel}
-            />
-          ) : null}
-        </div>
+        {activeSurface ? (
+          <WorkspaceSurfaceView
+            activationFocusRequestId={
+              activeSurface.kind === "thread"
+                ? threadActivationFocusRequestId
+                : terminalActivationFocusRequestId
+            }
+            surface={activeSurface}
+            bindSharedComposerHandle={focusedWindowId === props.windowId}
+          />
+        ) : (
+          <WorkspaceWindowEmptyState windowId={props.windowId} />
+        )}
         {dragItem && isWindowDragActive && !isPaperLayout ? (
           <>
             <div className="pointer-events-none absolute inset-0 z-10 bg-background/10" />
@@ -1597,16 +1678,6 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
               )}
             />
           </>
-        ) : null}
-        {activeServerThreadRef && activeRightPanel && shouldUseRightPanelSheet ? (
-          <RightPanelSheet open={panelOpen} onClose={handleToggleRightPanel}>
-            <WorkspaceThreadRightPanelHost
-              threadRef={activeServerThreadRef}
-              panel={activeRightPanel}
-              mode="sheet"
-              onClose={handleToggleRightPanel}
-            />
-          </RightPanelSheet>
         ) : null}
       </section>
     </div>
@@ -1621,6 +1692,7 @@ const WorkspaceThreadRightPanelHost = memo(function WorkspaceThreadRightPanelHos
   panel: ThreadRightPanelKind;
   mode: "sheet" | "sidebar";
   onClose: () => void;
+  onSelectPanel: (panel: ThreadRightPanelKind) => void;
 }) {
   const settings = useSettings();
   const activeThread = useStore(
@@ -1676,6 +1748,7 @@ const WorkspaceThreadRightPanelHost = memo(function WorkspaceThreadRightPanelHos
       workspaceRoot={activeWorkspaceRoot}
       timestampFormat={settings.timestampFormat}
       onClose={props.onClose}
+      onSelectPanel={props.onSelectPanel}
     />
   );
 });
