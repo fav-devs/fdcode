@@ -99,6 +99,7 @@ import { useModelPickerOpen } from "../modelPickerOpenState";
 import { useShortcutModifierState } from "../shortcutModifierState";
 import { useGitStatus } from "../lib/gitStatusState";
 import { useListeningPortProbe } from "../lib/portProbeState";
+import { usePortForwards } from "../rpc/portsState";
 import { sidebarAgentCommandStatusKey } from "../session-logic";
 import { readLocalApi } from "../localApi";
 import { useComposerDraftStore } from "../composerDraftStore";
@@ -377,6 +378,8 @@ function AgentCommandStatusDialog({
   const dismissAgentCommandStatus = useUiStateStore((state) => state.dismissAgentCommandStatus);
   const [stoppingPorts, setStoppingPorts] = useState<ReadonlySet<number>>(() => new Set());
   const [stopMessage, setStopMessage] = useState<string | null>(null);
+  const [forwardingPorts, setForwardingPorts] = useState<ReadonlySet<number>>(() => new Set());
+  const portForwards = usePortForwards();
   const statusKey = useMemo(() => (status ? sidebarAgentCommandStatusKey(status) : null), [status]);
   const urls = useMemo(() => (status ? agentCommandStatusUrls(status) : []), [status]);
   const ports = useMemo(() => (status ? agentCommandStatusPorts(status) : []), [status]);
@@ -385,6 +388,7 @@ function AgentCommandStatusDialog({
     if (!open) {
       setStoppingPorts(new Set());
       setStopMessage(null);
+      setForwardingPorts(new Set());
     }
   }, [open]);
 
@@ -460,6 +464,49 @@ function AgentCommandStatusDialog({
     [environmentId],
   );
 
+  const forwardPort = useCallback(
+    async (remotePort: number, label?: string) => {
+      const api = readEnvironmentApi(environmentId);
+      if (!api?.ports?.forwardCreate) {
+        toastManager.add({
+          type: "error",
+          title: "Unable to forward port",
+          description: "This environment does not support port forwarding.",
+        });
+        return;
+      }
+      setForwardingPorts((prev) => {
+        const next = new Set(prev);
+        next.add(remotePort);
+        return next;
+      });
+      try {
+        const forward = await api.ports.forwardCreate({
+          remotePort,
+          label: label ?? `Agent: port ${remotePort}`,
+        });
+        toastManager.add({
+          type: "success",
+          title: `Port ${remotePort} forwarded`,
+          description: `Now accessible at localhost:${forward.localPort}`,
+        });
+      } catch (error) {
+        toastManager.add({
+          type: "error",
+          title: "Unable to forward port",
+          description: error instanceof Error ? error.message : "An error occurred.",
+        });
+      } finally {
+        setForwardingPorts((prev) => {
+          const next = new Set(prev);
+          next.delete(remotePort);
+          return next;
+        });
+      }
+    },
+    [environmentId],
+  );
+
   const hasUrls = urls.length > 0;
   const hasPorts = ports.length > 0;
   const portsWithoutUrl = useMemo(() => {
@@ -505,6 +552,11 @@ function AgentCommandStatusDialog({
             <ul className="divide-y divide-border/40">
               {urls.map((url) => {
                 const isStoppingThis = url.port != null && stoppingPorts.has(url.port);
+                const isForwardingThis = url.port != null && forwardingPorts.has(url.port);
+                const existingForward =
+                  url.port != null
+                    ? portForwards.find((f) => f.remotePort === url.port)
+                    : undefined;
                 return (
                   <li
                     key={url.href}
@@ -517,7 +569,9 @@ function AgentCommandStatusDialog({
                       </div>
                       {url.port != null ? (
                         <div className="mt-px font-mono text-[10.5px] text-muted-foreground/70">
-                          port {url.port}
+                          {existingForward
+                            ? `forwarded → localhost:${existingForward.localPort}`
+                            : `port ${url.port}`}
                         </div>
                       ) : null}
                     </div>
@@ -532,6 +586,19 @@ function AgentCommandStatusDialog({
                         Open
                         <ExternalLinkIcon className="size-3" />
                       </a>
+                      {url.port != null && !existingForward ? (
+                        <button
+                          type="button"
+                          onClick={() => void forwardPort(url.port as number, agentCommandUrlLabel(url))}
+                          disabled={isForwardingThis}
+                          aria-label={`Forward port ${url.port}`}
+                          title={`Forward port ${url.port} for remote access`}
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground opacity-70 transition-all hover:bg-background hover:text-foreground hover:opacity-100 hover:shadow-sm group-hover:opacity-100 disabled:cursor-progress disabled:opacity-40"
+                        >
+                          {isForwardingThis ? "Forwarding…" : "Forward"}
+                          {!isForwardingThis ? <PlugZapIcon className="size-3" /> : null}
+                        </button>
+                      ) : null}
                       {url.port != null ? (
                         <button
                           type="button"
@@ -568,23 +635,44 @@ function AgentCommandStatusDialog({
               <ul className="divide-y divide-border/40">
                 {portsWithoutUrl.map((port) => {
                   const isStoppingThis = stoppingPorts.has(port);
+                  const isForwardingThis = forwardingPorts.has(port);
+                  const existingForward = portForwards.find((f) => f.remotePort === port);
                   return (
                     <li
                       key={port}
                       className="group flex items-center gap-3 px-5 py-2 transition-colors hover:bg-muted/40 dark:hover:bg-muted/20"
                     >
-                      <span className="font-mono text-[12.5px] text-foreground">port {port}</span>
-                      <button
-                        type="button"
-                        onClick={() => void stopPorts([port])}
-                        disabled={isStoppingThis}
-                        aria-label={`Stop process on port ${port}`}
-                        title={`Stop process on port ${port}`}
-                        className="ml-auto inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground opacity-70 transition-all hover:bg-destructive/10 hover:text-destructive hover:opacity-100 hover:shadow-sm group-hover:opacity-100 disabled:cursor-progress disabled:opacity-40"
-                      >
-                        {isStoppingThis ? "Stopping…" : "Stop"}
-                        {!isStoppingThis ? <PowerIcon className="size-3" /> : null}
-                      </button>
+                      <span className="min-w-0 flex-1 font-mono text-[12.5px] text-foreground">
+                        {existingForward
+                          ? `port ${port} → localhost:${existingForward.localPort}`
+                          : `port ${port}`}
+                      </span>
+                      <div className="flex shrink-0 items-center gap-1">
+                        {!existingForward ? (
+                          <button
+                            type="button"
+                            onClick={() => void forwardPort(port)}
+                            disabled={isForwardingThis}
+                            aria-label={`Forward port ${port}`}
+                            title={`Forward port ${port} for remote access`}
+                            className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground opacity-70 transition-all hover:bg-background hover:text-foreground hover:opacity-100 hover:shadow-sm group-hover:opacity-100 disabled:cursor-progress disabled:opacity-40"
+                          >
+                            {isForwardingThis ? "Forwarding…" : "Forward"}
+                            {!isForwardingThis ? <PlugZapIcon className="size-3" /> : null}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={() => void stopPorts([port])}
+                          disabled={isStoppingThis}
+                          aria-label={`Stop process on port ${port}`}
+                          title={`Stop process on port ${port}`}
+                          className="inline-flex cursor-pointer items-center gap-1 rounded-md px-2 py-1 font-medium text-[11px] text-muted-foreground opacity-70 transition-all hover:bg-destructive/10 hover:text-destructive hover:opacity-100 hover:shadow-sm group-hover:opacity-100 disabled:cursor-progress disabled:opacity-40"
+                        >
+                          {isStoppingThis ? "Stopping…" : "Stop"}
+                          {!isStoppingThis ? <PowerIcon className="size-3" /> : null}
+                        </button>
+                      </div>
                     </li>
                   );
                 })}
@@ -887,6 +975,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   );
   const handleDragEnd = useCallback(() => {
     useWorkspaceDragStore.getState().clearItem();
+  }, []);
   const handleConfirmArchiveClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.preventDefault();
