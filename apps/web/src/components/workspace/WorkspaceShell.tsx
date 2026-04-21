@@ -1,5 +1,6 @@
 import { useNavigate, useParams, useSearch } from "@tanstack/react-router";
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
+import type { ScopedThreadRef } from "@t3tools/contracts";
 import { DEFAULT_INTERACTION_MODE, DEFAULT_RUNTIME_MODE } from "../../types";
 import {
   Columns2Icon,
@@ -13,6 +14,7 @@ import { Fragment, memo, useCallback, useEffect, useMemo, useRef, useState } fro
 import { useShallow } from "zustand/react/shallow";
 import { createThreadSelectorByRef } from "../../storeSelectors";
 import {
+  selectProjectByRef,
   selectProjectsAcrossEnvironments,
   selectSidebarThreadsAcrossEnvironments,
   useStore,
@@ -23,9 +25,7 @@ import { SidebarHeaderTrigger, SidebarInset } from "../ui/sidebar";
 import { ClaudeAI, Gemini, OpenAI } from "../Icons";
 import ChatView from "../ChatView";
 import { useComposerDraftStore } from "../../composerDraftStore";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../../diffRouteSearch";
-import { parseFileRouteSearch, stripFileSearchParams } from "../../fileRouteSearch";
-import { parsePortsRouteSearch, stripPortsSearchParams } from "../../portsRouteSearch";
+import { parseThreadRouteSearch, stripThreadPanelSearchParams } from "../../chatPanelRouteSearch";
 import {
   createDefaultSingleChatPanelState,
   useSingleChatPanelStore,
@@ -57,6 +57,14 @@ import {
 } from "../../workspace/types";
 import { useSettings } from "~/hooks/useSettings";
 import { AppStatusBar } from "../AppStatusBar";
+import {
+  deriveActivePlanState,
+  findLatestProposedPlan,
+  isLatestTurnSettled,
+} from "../../session-logic";
+import { ThreadRightPanel, type ThreadRightPanelKind } from "../ThreadRightPanel";
+import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../../rightPanelLayout";
+import { RightPanelSheet } from "../RightPanelSheet";
 
 const WORKSPACE_MIN_PANE_SIZE_PX = 220;
 const WORKSPACE_DROP_EDGE_THRESHOLD = 0.22;
@@ -1126,12 +1134,9 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
   });
   const routePanelSearch = useSearch({
     strict: false,
-    select: (search) => ({
-      ...parseDiffRouteSearch(search),
-      ...parseFileRouteSearch(search),
-      ...parsePortsRouteSearch(search),
-    }),
+    select: (search) => parseThreadRouteSearch(search),
   });
+  const shouldUseRightPanelSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY);
   const window = useWorkspaceWindow(props.windowId);
   const tabSurfaces = useWorkspaceWindowSurfaces(props.windowId);
   const activeSurface = useWorkspaceWindowActiveSurface(props.windowId);
@@ -1153,7 +1158,18 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
     routeTarget.threadRef.threadId === activeServerThreadRef.threadId &&
     (routePanelSearch.diff === "1" ||
       routePanelSearch.files === "1" ||
-      routePanelSearch.ports === "1");
+      routePanelSearch.ports === "1" ||
+      routePanelSearch.plan === "1");
+  const activeRightPanel: ThreadRightPanelKind | null =
+    panelOpen && routePanelSearch.diff === "1"
+      ? "diff"
+      : panelOpen && routePanelSearch.files === "1"
+        ? "files"
+        : panelOpen && routePanelSearch.ports === "1"
+          ? "ports"
+          : panelOpen && routePanelSearch.plan === "1"
+            ? "plan"
+            : null;
   const isFocusedPane = focusedWindowId === props.windowId;
   const [isWindowDragActive, setIsWindowDragActive] = useState(false);
   const [threadActivationFocusRequestId, setThreadActivationFocusRequestId] = useState(0);
@@ -1352,8 +1368,8 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
     void navigate({
       to: "/$environmentId/$threadId",
       params: buildThreadRouteParams(activeServerThreadRef),
-      search: (previous) => {
-        const rest = stripPortsSearchParams(stripFileSearchParams(stripDiffSearchParams(previous)));
+      search: (previous: Record<string, unknown>) => {
+        const rest = stripThreadPanelSearchParams(previous);
         const isCurrentRouteThread =
           routeTarget?.kind === "server" &&
           routeTarget.threadRef.environmentId === activeServerThreadRef.environmentId &&
@@ -1368,6 +1384,9 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
         }
         if (panelToOpen === "ports") {
           return { ...rest, ports: "1" as const };
+        }
+        if (panelToOpen === "plan") {
+          return { ...rest, plan: "1" as const };
         }
         return { ...rest, diff: "1" as const };
       },
@@ -1543,19 +1562,31 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
         onDrop={isPaperLayout ? undefined : handleWindowDrop}
         onDragOver={isPaperLayout ? undefined : handleWindowDragOver}
       >
-        {activeSurface ? (
-          <WorkspaceSurfaceView
-            activationFocusRequestId={
-              activeSurface.kind === "thread"
-                ? threadActivationFocusRequestId
-                : terminalActivationFocusRequestId
-            }
-            surface={activeSurface}
-            bindSharedComposerHandle={focusedWindowId === props.windowId}
-          />
-        ) : (
-          <WorkspaceWindowEmptyState windowId={props.windowId} />
-        )}
+        <div className="flex min-h-0 flex-1">
+          <div className="min-h-0 min-w-0 flex-1">
+            {activeSurface ? (
+              <WorkspaceSurfaceView
+                activationFocusRequestId={
+                  activeSurface.kind === "thread"
+                    ? threadActivationFocusRequestId
+                    : terminalActivationFocusRequestId
+                }
+                surface={activeSurface}
+                bindSharedComposerHandle={focusedWindowId === props.windowId}
+              />
+            ) : (
+              <WorkspaceWindowEmptyState windowId={props.windowId} />
+            )}
+          </div>
+          {activeServerThreadRef && activeRightPanel && !shouldUseRightPanelSheet ? (
+            <WorkspaceThreadRightPanelHost
+              threadRef={activeServerThreadRef}
+              panel={activeRightPanel}
+              mode="sidebar"
+              onClose={handleToggleRightPanel}
+            />
+          ) : null}
+        </div>
         {dragItem && isWindowDragActive && !isPaperLayout ? (
           <>
             <div className="pointer-events-none absolute inset-0 z-10 bg-background/10" />
@@ -1567,8 +1598,85 @@ const WorkspaceWindowView = memo(function WorkspaceWindowView(props: {
             />
           </>
         ) : null}
+        {activeServerThreadRef && activeRightPanel && shouldUseRightPanelSheet ? (
+          <RightPanelSheet open={panelOpen} onClose={handleToggleRightPanel}>
+            <WorkspaceThreadRightPanelHost
+              threadRef={activeServerThreadRef}
+              panel={activeRightPanel}
+              mode="sheet"
+              onClose={handleToggleRightPanel}
+            />
+          </RightPanelSheet>
+        ) : null}
       </section>
     </div>
+  );
+});
+
+const EMPTY_WORKSPACE_ACTIVITIES: ReadonlyArray<never> = [];
+const EMPTY_WORKSPACE_PROPOSED_PLANS: ReadonlyArray<never> = [];
+
+const WorkspaceThreadRightPanelHost = memo(function WorkspaceThreadRightPanelHost(props: {
+  threadRef: ScopedThreadRef;
+  panel: ThreadRightPanelKind;
+  mode: "sheet" | "sidebar";
+  onClose: () => void;
+}) {
+  const settings = useSettings();
+  const activeThread = useStore(
+    useMemo(() => createThreadSelectorByRef(props.threadRef), [props.threadRef]),
+  );
+  const activeProjectId = activeThread?.projectId ?? null;
+  const activeProject = useStore((store) =>
+    activeThread && activeProjectId
+      ? selectProjectByRef(store, {
+          environmentId: activeThread.environmentId,
+          projectId: activeProjectId,
+        })
+      : undefined,
+  );
+  const latestTurnSettled = isLatestTurnSettled(
+    activeThread?.latestTurn ?? null,
+    activeThread?.session ?? null,
+  );
+  const activeProposedPlan = useMemo(
+    () =>
+      findLatestProposedPlan(
+        activeThread?.proposedPlans ?? EMPTY_WORKSPACE_PROPOSED_PLANS,
+        activeThread?.latestTurn?.turnId ?? null,
+      ),
+    [activeThread?.latestTurn?.turnId, activeThread?.proposedPlans],
+  );
+  const activePlan = useMemo(
+    () =>
+      deriveActivePlanState(
+        activeThread?.activities ?? EMPTY_WORKSPACE_ACTIVITIES,
+        activeThread?.latestTurn?.turnId ?? undefined,
+      ),
+    [activeThread?.activities, activeThread?.latestTurn?.turnId],
+  );
+  const activeProjectCwd = activeProject?.cwd ?? null;
+  const activeThreadWorktreePath = activeThread?.worktreePath ?? null;
+  const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined;
+  const planLabel =
+    activeProposedPlan || activeThread?.interactionMode === "plan" || !latestTurnSettled
+      ? "Plan"
+      : "Tasks";
+
+  return (
+    <ThreadRightPanel
+      panel={props.panel}
+      mode={props.mode}
+      environmentId={props.threadRef.environmentId}
+      portsCwd={activeWorkspaceRoot}
+      activePlan={activePlan}
+      activeProposedPlan={activeProposedPlan}
+      planLabel={planLabel}
+      markdownCwd={activeWorkspaceRoot}
+      workspaceRoot={activeWorkspaceRoot}
+      timestampFormat={settings.timestampFormat}
+      onClose={props.onClose}
+    />
   );
 });
 

@@ -1,9 +1,11 @@
+import { isRouteSearchToggleEnabled } from "./routeSearchValue";
+
 export interface PortsRouteSearch {
   ports?: "1" | undefined;
 }
 
 function isPortsOpenValue(value: unknown): boolean {
-  return value === "1" || value === 1 || value === true;
+  return isRouteSearchToggleEnabled(value);
 }
 
 export function stripPortsSearchParams<T extends Record<string, unknown>>(

@@ -39,6 +39,20 @@ describe("parseDiffRouteSearch", () => {
     });
   });
 
+  it("treats JSON-encoded diff values as open", () => {
+    expect(
+      parseDiffRouteSearch({
+        diff: '"1"',
+        diffTurnId: '"turn-1"',
+        diffFilePath: '"src/app.ts"',
+      }),
+    ).toEqual({
+      diff: "1",
+      diffTurnId: "turn-1",
+      diffFilePath: "src/app.ts",
+    });
+  });
+
   it("drops turn and file values when diff is closed", () => {
     const parsed = parseDiffRouteSearch({
       diff: "0",

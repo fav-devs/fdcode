@@ -62,6 +62,16 @@ import {
 import { type ComposerPromptEditorHandle, ComposerPromptEditor } from "../ComposerPromptEditor";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { type ComposerCommandItem, ComposerCommandMenu } from "./ComposerCommandMenu";
+import {
+  ComposerLocalDirectoryMenu,
+  type ComposerLocalDirectoryMenuHandle,
+} from "./ComposerLocalDirectoryMenu";
+import {
+  isLocalFolderMentionQuery,
+  matchesLocalFolderMentionShortcut,
+  LOCAL_FOLDER_MENTION_NAME,
+} from "~/lib/localFolderMentions";
+import { formatComposerMentionToken } from "~/lib/composerMentions";
 import { ComposerPendingApprovalActions } from "./ComposerPendingApprovalActions";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerPrimaryActions } from "./ComposerPrimaryActions";
@@ -418,6 +428,7 @@ export interface ChatComposerProps {
   keybindings: ResolvedKeybindingsConfig;
   terminalOpen: boolean;
   gitCwd: string | null;
+  homeDir: string | null;
 
   // Refs the parent needs kept in sync
   promptRef: React.MutableRefObject<string>;
@@ -508,6 +519,7 @@ export const ChatComposer = memo(
       keybindings,
       terminalOpen,
       gitCwd,
+      homeDir,
       promptRef,
       composerImagesRef,
       composerTerminalContextsRef,
@@ -670,6 +682,7 @@ export const ChatComposer = memo(
     const composerSelectLockRef = useRef(false);
     const composerMenuOpenRef = useRef(false);
     const composerMenuItemsRef = useRef<ComposerCommandItem[]>([]);
+    const localDirectoryMenuRef = useRef<ComposerLocalDirectoryMenuHandle | null>(null);
     const activeComposerMenuItemRef = useRef<ComposerCommandItem | null>(null);
     const dragDepthRef = useRef(0);
 
@@ -699,6 +712,8 @@ export const ChatComposer = memo(
     const composerTriggerKind = composerTrigger?.kind ?? null;
     const pathTriggerQuery = composerTrigger?.kind === "path" ? composerTrigger.query : "";
     const isPathTrigger = composerTriggerKind === "path";
+    const isLocalFolderBrowserOpen =
+      composerTrigger?.kind === "path" && isLocalFolderMentionQuery(pathTriggerQuery);
     const [debouncedPathQuery, composerPathQueryDebouncer] = useDebouncedValue(
       pathTriggerQuery,
       { wait: COMPOSER_PATH_QUERY_DEBOUNCE_MS },
@@ -710,7 +725,7 @@ export const ChatComposer = memo(
         environmentId,
         cwd: gitCwd,
         query: effectivePathQuery,
-        enabled: isPathTrigger,
+        enabled: isPathTrigger && !isLocalFolderBrowserOpen,
         limit: 80,
       }),
     );
@@ -719,14 +734,29 @@ export const ChatComposer = memo(
     const composerMenuItems = useMemo<ComposerCommandItem[]>(() => {
       if (!composerTrigger) return [];
       if (composerTrigger.kind === "path") {
-        return workspaceEntries.map((entry) => ({
-          id: `path:${entry.kind}:${entry.path}`,
-          type: "path",
-          path: entry.path,
-          pathKind: entry.kind,
-          label: basenameOfPath(entry.path),
-          description: entry.parentPath ?? "",
-        }));
+        if (isLocalFolderBrowserOpen) return [];
+        const localRootItems: ComposerCommandItem[] =
+          matchesLocalFolderMentionShortcut(composerTrigger.query) && composerTrigger.query !== "/"
+            ? [
+                {
+                  id: "local-root",
+                  type: "local-root" as const,
+                  label: `@${LOCAL_FOLDER_MENTION_NAME}`,
+                  description: "Browse folders on this computer",
+                },
+              ]
+            : [];
+        return [
+          ...localRootItems,
+          ...workspaceEntries.map((entry) => ({
+            id: `path:${entry.kind}:${entry.path}`,
+            type: "path" as const,
+            path: entry.path,
+            pathKind: entry.kind,
+            label: basenameOfPath(entry.path),
+            description: entry.parentPath ?? "",
+          })),
+        ];
       }
       if (composerTrigger.kind === "slash-command") {
         const builtInSlashCommandItems = [
@@ -1356,6 +1386,22 @@ export const ChatComposer = memo(
         });
         const { snapshot, trigger } = resolveActiveComposerTrigger();
         if (!trigger) return;
+        if (item.type === "local-root") {
+          const replacement = `@${LOCAL_FOLDER_MENTION_NAME}/`;
+          const applied = applyPromptReplacement(
+            trigger.rangeStart,
+            trigger.rangeEnd,
+            replacement,
+            {
+              expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+              focusEditorAfterReplace: false,
+            },
+          );
+          if (applied) {
+            setComposerHighlightedItemId(null);
+          }
+          return;
+        }
         if (item.type === "path") {
           const replacement = `@${item.path} `;
           const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
@@ -1435,6 +1481,42 @@ export const ChatComposer = memo(
       [applyPromptReplacement, handleInteractionModeChange, resolveActiveComposerTrigger],
     );
 
+    const handleSelectLocalDirectoryMention = useCallback(
+      (absolutePath: string) => {
+        const { snapshot, trigger } = resolveActiveComposerTrigger();
+        if (!trigger) return;
+        const replacement = formatComposerMentionToken(absolutePath) + " ";
+        const replacementRangeEnd = extendReplacementRangeForTrailingSpace(
+          snapshot.value,
+          trigger.rangeEnd,
+          replacement,
+        );
+        const applied = applyPromptReplacement(
+          trigger.rangeStart,
+          replacementRangeEnd,
+          replacement,
+          { expectedText: snapshot.value.slice(trigger.rangeStart, replacementRangeEnd) },
+        );
+        if (applied) {
+          setComposerHighlightedItemId(null);
+        }
+      },
+      [applyPromptReplacement, resolveActiveComposerTrigger],
+    );
+
+    const handleNavigateLocalFolder = useCallback(
+      (displayPath: string) => {
+        const { snapshot, trigger } = resolveActiveComposerTrigger();
+        if (!trigger) return;
+        const replacement = `@${displayPath}`;
+        applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, replacement, {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+          focusEditorAfterReplace: false,
+        });
+      },
+      [applyPromptReplacement, resolveActiveComposerTrigger],
+    );
+
     const onComposerMenuItemHighlighted = useCallback(
       (itemId: string | null) => {
         setComposerHighlightedItemId(itemId);
@@ -1473,7 +1555,21 @@ export const ChatComposer = memo(
       }
       const { trigger } = resolveActiveComposerTrigger();
       const menuIsActive = composerMenuOpenRef.current || trigger !== null;
-      if (menuIsActive) {
+      if (menuIsActive && isLocalFolderBrowserOpen) {
+        if (key === "ArrowDown") {
+          localDirectoryMenuRef.current?.moveHighlight("down");
+          return true;
+        }
+        if (key === "ArrowUp") {
+          localDirectoryMenuRef.current?.moveHighlight("up");
+          return true;
+        }
+        if (key === "Enter" || key === "Tab") {
+          localDirectoryMenuRef.current?.activateHighlighted();
+          return true;
+        }
+      }
+      if (menuIsActive && !isLocalFolderBrowserOpen) {
         const currentItems = composerMenuItemsRef.current;
         const selectedItem = activeComposerMenuItemRef.current ?? currentItems[0];
         if (key === "ArrowDown" && currentItems.length > 0) {
@@ -1769,20 +1865,32 @@ export const ChatComposer = memo(
             >
               {composerMenuOpen && !isComposerApprovalState && (
                 <div className="absolute inset-x-0 bottom-full z-20 mb-2 px-1">
-                  <ComposerCommandMenu
-                    items={composerMenuItems}
-                    resolvedTheme={resolvedTheme}
-                    isLoading={isComposerMenuLoading}
-                    triggerKind={composerTriggerKind}
-                    groupSlashCommandSections={
-                      composerTrigger?.kind === "slash-command" &&
-                      composerTrigger.query.trim().length === 0
-                    }
-                    emptyStateText={composerMenuEmptyState}
-                    activeItemId={activeComposerMenuItem?.id ?? null}
-                    onHighlightedItemChange={onComposerMenuItemHighlighted}
-                    onSelect={onSelectComposerItem}
-                  />
+                  {isLocalFolderBrowserOpen ? (
+                    <ComposerLocalDirectoryMenu
+                      environmentId={environmentId}
+                      mentionQuery={pathTriggerQuery}
+                      rootLabel="Local files"
+                      homeDir={homeDir}
+                      onSelectEntry={handleSelectLocalDirectoryMention}
+                      onNavigateFolder={handleNavigateLocalFolder}
+                      handleRef={localDirectoryMenuRef}
+                    />
+                  ) : (
+                    <ComposerCommandMenu
+                      items={composerMenuItems}
+                      resolvedTheme={resolvedTheme}
+                      isLoading={isComposerMenuLoading}
+                      triggerKind={composerTriggerKind}
+                      groupSlashCommandSections={
+                        composerTrigger?.kind === "slash-command" &&
+                        composerTrigger.query.trim().length === 0
+                      }
+                      emptyStateText={composerMenuEmptyState}
+                      activeItemId={activeComposerMenuItem?.id ?? null}
+                      onHighlightedItemChange={onComposerMenuItemHighlighted}
+                      onSelect={onSelectComposerItem}
+                    />
+                  )}
                 </div>
               )}
 

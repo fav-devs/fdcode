@@ -18,7 +18,8 @@ import {
   CommandList,
   CommandSeparator,
 } from "../ui/command";
-import { VscodeEntryIcon } from "./VscodeEntryIcon";
+import { FileEntryIcon } from "./FileEntryIcon";
+import { LaptopIcon } from "lucide-react";
 
 export type ComposerCommandItem =
   | {
@@ -49,6 +50,12 @@ export type ComposerCommandItem =
       type: "skill";
       provider: ProviderKind;
       skill: ServerProviderSkill;
+      label: string;
+      description: string;
+    }
+  | {
+      id: string;
+      type: "local-root";
       label: string;
       description: string;
     };
@@ -227,11 +234,14 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
       }}
     >
       {props.item.type === "path" ? (
-        <VscodeEntryIcon
+        <FileEntryIcon
           pathValue={props.item.path}
           kind={props.item.pathKind}
           theme={props.resolvedTheme}
         />
+      ) : null}
+      {props.item.type === "local-root" ? (
+        <LaptopIcon className="size-4 shrink-0 text-muted-foreground/80" />
       ) : null}
       {props.item.type === "slash-command" ? (
         <BotIcon className="size-4 shrink-0 text-muted-foreground/80" />

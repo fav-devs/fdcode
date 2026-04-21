@@ -51,12 +51,18 @@ import {
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
 import {
+  ProjectListDirectoriesError,
+  ProjectListDirectoriesInput,
+  ProjectListDirectoriesResult,
   ProjectReadFileError,
   ProjectReadFileInput,
   ProjectReadFileResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
+  ProjectSearchLocalEntriesError,
+  ProjectSearchLocalEntriesInput,
+  ProjectSearchLocalEntriesResult,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
@@ -109,6 +115,8 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
+  projectsSearchLocalEntries: "projects.searchLocalEntries",
+  projectsListDirectories: "projects.listDirectories",
   projectsWriteFile: "projects.writeFile",
   projectsReadFile: "projects.readFile",
 
@@ -201,6 +209,18 @@ export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntr
   payload: ProjectSearchEntriesInput,
   success: ProjectSearchEntriesResult,
   error: ProjectSearchEntriesError,
+});
+
+export const WsProjectsSearchLocalEntriesRpc = Rpc.make(WS_METHODS.projectsSearchLocalEntries, {
+  payload: ProjectSearchLocalEntriesInput,
+  success: ProjectSearchLocalEntriesResult,
+  error: ProjectSearchLocalEntriesError,
+});
+
+export const WsProjectsListDirectoriesRpc = Rpc.make(WS_METHODS.projectsListDirectories, {
+  payload: ProjectListDirectoriesInput,
+  success: ProjectListDirectoriesResult,
+  error: ProjectListDirectoriesError,
 });
 
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
@@ -469,6 +489,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
   WsProjectsSearchEntriesRpc,
+  WsProjectsSearchLocalEntriesRpc,
+  WsProjectsListDirectoriesRpc,
   WsProjectsWriteFileRpc,
   WsProjectsReadFileRpc,
   WsShellOpenInEditorRpc,

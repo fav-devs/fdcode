@@ -27,7 +27,9 @@ import {
   OrchestrationGetTurnDiffError,
   ORCHESTRATION_WS_METHODS,
   ProjectReadFileError,
+  ProjectListDirectoriesError,
   ProjectSearchEntriesError,
+  ProjectSearchLocalEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
   FilesystemBrowseError,
@@ -802,6 +804,32 @@ const makeWsRpcLayer = (currentSessionId: AuthSessionId) =>
                   new ProjectSearchEntriesError({
                     message: `Failed to search workspace entries: ${cause.detail}`,
                     cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsSearchLocalEntries]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsSearchLocalEntries,
+            workspaceEntries.searchLocal(input).pipe(
+              Effect.mapError(
+                () =>
+                  new ProjectSearchLocalEntriesError({
+                    message: `Failed to search local entries`,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.projectsListDirectories]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsListDirectories,
+            workspaceEntries.listDirectories(input).pipe(
+              Effect.mapError(
+                () =>
+                  new ProjectListDirectoriesError({
+                    message: `Failed to list directories`,
                   }),
               ),
             ),
