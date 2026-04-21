@@ -598,7 +598,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     if (event.startsWith("options:fast-mode:")) {
       const fastMode = event.endsWith(":on");
       const nextFast = fastMode || undefined;
-      if (currentModelSelection.provider === "opencode") {
+      if (
+        currentModelSelection.provider === "opencode" ||
+        currentModelSelection.provider === "copilot"
+      ) {
         return;
       }
       const updated: ModelSelection = {
