@@ -600,7 +600,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       const nextFast = fastMode || undefined;
       if (
         currentModelSelection.provider === "opencode" ||
-        currentModelSelection.provider === "copilot"
+        currentModelSelection.provider === "copilot" ||
+        currentModelSelection.provider === "gemini"
       ) {
         return;
       }
