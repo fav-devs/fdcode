@@ -18,6 +18,10 @@ export function createEnvironmentApi(rpcClient: WsRpcClient): EnvironmentApi {
       close: (input) => rpcClient.terminal.close(input as never),
       onMetadata: (callback, options) => rpcClient.terminal.onMetadata(callback, options),
     },
+    localProcesses: {
+      stopPorts: rpcClient.localProcesses.stopPorts,
+      probePorts: rpcClient.localProcesses.probePorts,
+    },
     projects: {
       searchEntries: rpcClient.projects.searchEntries,
       writeFile: rpcClient.projects.writeFile,
