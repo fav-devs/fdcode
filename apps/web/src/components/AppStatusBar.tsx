@@ -42,10 +42,7 @@ function CpuRamStats() {
     <Tooltip>
       <TooltipTrigger
         render={
-          <button
-            type="button"
-            className="flex items-center gap-2.5 rounded px-1.5 py-0.5 hover:bg-white/5"
-          >
+          <button type="button" className="flex items-center gap-2.5 rounded-md px-1 py-.5">
             <StatItem
               icon={<CpuIcon className="size-3 shrink-0" />}
               value={`${cpu}%`}
@@ -119,9 +116,9 @@ export const AppStatusBar = memo(function AppStatusBar() {
   const isConnected = !!welcome;
 
   return (
-    <div className="flex h-7 shrink-0 items-center border-t border-border/30 bg-black/[0.03] px-8 text-[11px] dark:bg-white/[0.02]">
+    <div className="flex h-7 shrink-0 items-center justify-between gap-2 px-3 sm:px-4 md:px-5 text-[11px]">
       {/* Left section — connection + workspace */}
-      <div className="flex items-center gap-2">
+      <div className="flex min-w-0 -translate-y-px items-center gap-2 rounded-2xl border border-border/60 bg-background/68 px-2 py-0.5 shadow-sm backdrop-blur">
         <ConnectionPill
           connected={isConnected}
           {...(welcome?.projectName ? { label: welcome.projectName } : {})}
@@ -148,7 +145,7 @@ export const AppStatusBar = memo(function AppStatusBar() {
       </div>
 
       {/* Right section — system stats */}
-      <div className="ml-auto flex items-center">
+      <div className="shrink-0 -translate-y-px rounded-2xl border border-border/60 bg-background/68 px-2 py-0.5 shadow-sm backdrop-blur">
         <CpuRamStats />
       </div>
     </div>

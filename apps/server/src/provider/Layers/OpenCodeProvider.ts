@@ -316,11 +316,12 @@ export const OpenCodeProviderLive = Layer.effect(
             status: "error",
             auth: { status: "unknown" },
             message: failure.message,
-          usageLimits: makeUnavailableUsageLimits({
-            source: "opencodeManaged",
-            checkedAt,
-            reason: "Unable to fetch usage",
-          }),
+            usageLimits: makeUnavailableUsageLimits({
+              source: "opencodeManaged",
+              checkedAt,
+              reason: "Unable to fetch usage",
+            }),
+          },
         });
       };
 
@@ -343,11 +344,11 @@ export const OpenCodeProviderLive = Layer.effect(
             message: isExternalServer
               ? "OpenCode is disabled in fd code settings. A server URL is configured."
               : "OpenCode is disabled in fd code settings.",
-          usageLimits: makeUnavailableUsageLimits({
-            source: "opencodeManaged",
-            checkedAt,
-            reason: "Unable to fetch usage",
-          }),
+            usageLimits: makeUnavailableUsageLimits({
+              source: "opencodeManaged",
+              checkedAt,
+              reason: "Unable to fetch usage",
+            }),
           },
         });
       }
