@@ -1,25 +1,23 @@
 import { scopeProjectRef, scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime";
-import type { GitStatusResult } from "@t3tools/contracts";
+import type { VcsStatusResult } from "@t3tools/contracts";
 import { CloudIcon, GitPullRequestIcon, TerminalIcon } from "lucide-react";
-import { useMemo, type MouseEventHandler, type PointerEventHandler } from "react";
+import { useMemo } from "react";
 import { usePrimaryEnvironmentId } from "../environments/primary";
 import {
   useSavedEnvironmentRegistryStore,
   useSavedEnvironmentRuntimeStore,
 } from "../environments/runtime";
 import { useGitStatus } from "../lib/gitStatusState";
-import { cn } from "../lib/utils";
 import { type AppState, selectProjectByRef, useStore } from "../store";
-import { useThreadRunningTerminalIds } from "../terminalSessionState";
+import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
 import { useUiStateStore } from "../uiStateStore";
+import { resolveChangeRequestPresentation } from "../sourceControlPresentation";
 import { resolveThreadStatusPill, type ThreadStatusPill } from "./Sidebar.logic";
-import { ClaudeAI, CursorIcon, Gemini, OpenAI, OpenCodeIcon } from "./Icons";
-import { normalizeProviderBrandKey, providerIconClassName } from "./providerBrandClassNames";
-import type { SidebarAgentCommandStatus, SidebarThreadSummary } from "../types";
+import type { SidebarThreadSummary } from "../types";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 
 export interface PrStatusIndicator {
-  label: "PR open" | "PR closed" | "PR merged";
+  label: string;
   colorClass: string;
   tooltip: string;
   url: string;
@@ -31,43 +29,51 @@ export interface TerminalStatusIndicator {
   pulse: boolean;
 }
 
-export type ThreadPr = GitStatusResult["pr"];
+export type ThreadPr = VcsStatusResult["pr"];
 
-export function prStatusIndicator(pr: ThreadPr): PrStatusIndicator | null {
+export function prStatusIndicator(
+  pr: ThreadPr,
+  provider: VcsStatusResult["sourceControlProvider"] | null | undefined,
+): PrStatusIndicator | null {
   if (!pr) return null;
+  const presentation = resolveChangeRequestPresentation(provider);
 
   if (pr.state === "open") {
     return {
-      label: "PR open",
+      label: `${presentation.shortName} open`,
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
-      tooltip: `#${pr.number} PR open: ${pr.title}`,
+      tooltip: `#${pr.number} ${presentation.shortName} open: ${pr.title}`,
       url: pr.url,
     };
   }
   if (pr.state === "closed") {
     return {
-      label: "PR closed",
+      label: `${presentation.shortName} closed`,
       colorClass: "text-zinc-500 dark:text-zinc-400/80",
-      tooltip: `#${pr.number} PR closed: ${pr.title}`,
+      tooltip: `#${pr.number} ${presentation.shortName} closed: ${pr.title}`,
       url: pr.url,
     };
   }
   if (pr.state === "merged") {
     return {
-      label: "PR merged",
+      label: `${presentation.shortName} merged`,
       colorClass: "text-violet-600 dark:text-violet-300/90",
-      tooltip: `#${pr.number} PR merged: ${pr.title}`,
+      tooltip: `#${pr.number} ${presentation.shortName} merged: ${pr.title}`,
       url: pr.url,
     };
   }
   return null;
 }
 
+export function ChangeRequestStatusIcon({ className }: { className?: string }) {
+  return <GitPullRequestIcon className={className} />;
+}
+
 export function resolveThreadPr(
   threadBranch: string | null,
-  gitStatus: GitStatusResult | null,
+  gitStatus: VcsStatusResult | null,
 ): ThreadPr | null {
-  if (threadBranch === null || gitStatus === null || gitStatus.branch !== threadBranch) {
+  if (threadBranch === null || gitStatus === null || gitStatus.refName !== threadBranch) {
     return null;
   }
 
@@ -75,7 +81,7 @@ export function resolveThreadPr(
 }
 
 export function terminalStatusFromRunningIds(
-  runningTerminalIds: ReadonlyArray<string>,
+  runningTerminalIds: string[],
 ): TerminalStatusIndicator | null {
   if (runningTerminalIds.length === 0) {
     return null;
@@ -87,72 +93,6 @@ export function terminalStatusFromRunningIds(
   };
 }
 
-export function AgentCommandStatusIcon({
-  status,
-  isRunning = false,
-  interactive = false,
-  onPointerDown,
-  onClick,
-}: {
-  status: SidebarAgentCommandStatus | null;
-  isRunning?: boolean;
-  interactive?: boolean;
-  onPointerDown?: PointerEventHandler<HTMLElement>;
-  onClick?: MouseEventHandler<HTMLElement>;
-}) {
-  if (!status && !isRunning) {
-    return null;
-  }
-
-  const hasLocalUrl = status?.hasLocalUrl === true && Boolean(status.primaryUrl);
-  const label = isRunning
-    ? hasLocalUrl
-      ? "Server running — local URL detected"
-      : "Server running"
-    : hasLocalUrl
-      ? "Agent local URL detected"
-      : "Agent ran command";
-
-  const isEmerald = isRunning || hasLocalUrl;
-
-  const baseClassName =
-    "inline-flex size-5 items-center justify-center rounded-md outline-hidden transition-colors duration-150 focus-visible:ring-1 focus-visible:ring-ring";
-  const colorClassName = isEmerald
-    ? "text-emerald-600 dark:text-emerald-300/90"
-    : "text-muted-foreground/80";
-  const hoverClassName = isEmerald
-    ? "hover:bg-emerald-500/10 hover:text-emerald-700 dark:hover:bg-emerald-400/15 dark:hover:text-emerald-200"
-    : "hover:bg-accent hover:text-foreground";
-
-  const iconClassName = isRunning ? "size-3 animate-pulse" : "size-3";
-
-  if (!interactive) {
-    return (
-      <span
-        role="img"
-        aria-label={label}
-        title={label}
-        className={`${baseClassName} ${colorClassName}`}
-      >
-        <TerminalIcon className={iconClassName} />
-      </span>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      className={`${baseClassName} ${colorClassName} ${hoverClassName} cursor-pointer active:scale-95`}
-      onPointerDown={onPointerDown as PointerEventHandler<HTMLButtonElement> | undefined}
-      onClick={onClick as MouseEventHandler<HTMLButtonElement> | undefined}
-    >
-      <TerminalIcon className={iconClassName} />
-    </button>
-  );
-}
-
 export function ThreadStatusLabel({
   status,
   compact = false,
@@ -160,60 +100,17 @@ export function ThreadStatusLabel({
   status: ThreadStatusPill;
   compact?: boolean;
 }) {
-  const normalizedProvider = normalizeProviderBrandKey(status.workingProvider);
-  const iconClassName = cn(
-    "size-3",
-    providerIconClassName(status.workingProvider, "text-foreground"),
-    status.pulse && "animate-pulse",
-  );
-  const statusIcon =
-    normalizedProvider === "claudeAgent" ? (
-      <ClaudeAI
-        aria-hidden="true"
-        data-provider-status-icon={normalizedProvider}
-        className={iconClassName}
-      />
-    ) : normalizedProvider === "codex" ? (
-      <OpenAI
-        aria-hidden="true"
-        data-provider-status-icon={normalizedProvider}
-        className={iconClassName}
-      />
-    ) : normalizedProvider === "gemini" ? (
-      <Gemini
-        aria-hidden="true"
-        data-provider-status-icon={normalizedProvider}
-        className={iconClassName}
-      />
-    ) : normalizedProvider === "cursor" ? (
-      <CursorIcon
-        aria-hidden="true"
-        data-provider-status-icon={normalizedProvider}
-        className={iconClassName}
-      />
-    ) : normalizedProvider === "opencode" ? (
-      <OpenCodeIcon
-        aria-hidden="true"
-        data-provider-status-icon={normalizedProvider}
-        className={iconClassName}
-      />
-    ) : null;
-
   if (compact) {
     return (
       <span
         title={status.label}
         className={`inline-flex size-3.5 shrink-0 items-center justify-center ${status.colorClass}`}
       >
-        {statusIcon ? (
-          statusIcon
-        ) : (
-          <span
-            className={`size-[9px] rounded-full ${status.dotClass} ${
-              status.pulse ? "animate-pulse" : ""
-            }`}
-          />
-        )}
+        <span
+          className={`size-[9px] rounded-full ${status.dotClass} ${
+            status.pulse ? "animate-pulse" : ""
+          }`}
+        />
         <span className="sr-only">{status.label}</span>
       </span>
     );
@@ -224,15 +121,11 @@ export function ThreadStatusLabel({
       title={status.label}
       className={`inline-flex items-center gap-1 text-[10px] ${status.colorClass}`}
     >
-      {statusIcon ? (
-        statusIcon
-      ) : (
-        <span
-          className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
-            status.pulse ? "animate-pulse" : ""
-          }`}
-        />
-      )}
+      <span
+        className={`h-1.5 w-1.5 rounded-full ${status.dotClass} ${
+          status.pulse ? "animate-pulse" : ""
+        }`}
+      />
       <span className="hidden md:inline">{status.label}</span>
     </span>
   );
@@ -240,15 +133,13 @@ export function ThreadStatusLabel({
 
 /**
  * Non-interactive leading status icons for a thread row in compact contexts
- * like the command palette. Shows the PR state icon (if present) and the
+ * like the command palette. Shows the change request state icon (if present) and the
  * thread status dot, matching the sidebar's leading indicators.
  */
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary }) {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
-  const threadKey = scopedThreadKey(threadRef);
-  const lastVisitedAt = useUiStateStore((state) => state.threadLastVisitedAtById[threadKey]);
-  const dismissedStatusKey = useUiStateStore(
-    (state) => state.threadDismissedStatusKeyById[threadKey],
+  const lastVisitedAt = useUiStateStore(
+    (state) => state.threadLastVisitedAtById[scopedThreadKey(threadRef)],
   );
   const threadProjectCwd = useStore(
     useMemo(
@@ -264,17 +155,15 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
     cwd: thread.branch != null ? gitCwd : null,
   });
   const pr = resolveThreadPr(thread.branch, gitStatus.data);
-  const prStatus = prStatusIndicator(pr);
-  const agentCommandStatus = thread.agentCommandStatus;
+  const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const threadStatus = resolveThreadStatusPill({
     thread: {
       ...thread,
-      dismissedStatusKey,
       lastVisitedAt,
     },
   });
 
-  if (!prStatus && !threadStatus && !agentCommandStatus) {
+  if (!prStatus && !threadStatus) {
     return null;
   }
 
@@ -290,13 +179,12 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
               />
             }
           >
-            <GitPullRequestIcon className="size-3" />
+            <ChangeRequestStatusIcon className="size-3" />
           </TooltipTrigger>
           <TooltipPopup side="top">{prStatus.tooltip}</TooltipPopup>
         </Tooltip>
       ) : null}
       {threadStatus ? <ThreadStatusLabel status={threadStatus} /> : null}
-      {agentCommandStatus ? <AgentCommandStatusIcon status={agentCommandStatus} /> : null}
     </span>
   );
 }
@@ -307,10 +195,11 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
  * environment indicator, matching the sidebar's trailing indicators.
  */
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary }) {
-  const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: thread.environmentId,
-    threadId: thread.id,
-  });
+  const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+  const runningTerminalIds = useTerminalStateStore(
+    (state) =>
+      selectThreadTerminalState(state.terminalStateByThreadKey, threadRef).runningTerminalIds,
+  );
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const isRemoteThread =
     primaryEnvironmentId !== null && thread.environmentId !== primaryEnvironmentId;

@@ -54,18 +54,11 @@ export function AppSidebarLayout({ children }: { children: ReactNode }) {
   }, [navigate]);
 
   return (
-    <SidebarProvider
-      defaultOpen
-      className="min-h-dvh bg-[radial-gradient(120%_140%_at_0%_0%,color-mix(in_srgb,var(--color-neutral-500)_10%,transparent),transparent_42%),linear-gradient(180deg,color-mix(in_srgb,var(--background)_94%,black),var(--background))] px-2 py-2 md:px-3 md:py-3"
-    >
+    <SidebarProvider className="h-dvh! min-h-0!" defaultOpen>
       <Sidebar
         side="left"
-        variant="inset"
         collapsible="offcanvas"
-        className="text-foreground"
-        gapClassName="md:bg-transparent"
-        innerClassName="overflow-hidden rounded-[28px] bg-transparent text-foreground shadow-none backdrop-blur-0"
-        transparentSurface
+        className="border-r border-border bg-card text-foreground"
         resizable={{
           minWidth: THREAD_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: ({ nextWidth, wrapper }) =>

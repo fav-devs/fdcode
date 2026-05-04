@@ -93,6 +93,7 @@
     ]
   },
   "trustedDependencies": [
-    "node-pty"
+    "node-pty",
+    "electron"
   ]
 }

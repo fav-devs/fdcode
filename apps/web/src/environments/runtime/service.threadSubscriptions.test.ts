@@ -2,6 +2,7 @@ import { QueryClient } from "@tanstack/react-query";
 import {
   EnvironmentId,
   ProjectId,
+  ProviderInstanceId,
   ThreadId,
   TurnId,
   type OrchestrationShellSnapshot,
@@ -103,7 +104,7 @@ function makeThreadShellSnapshot(params: {
         projectId,
         title: "Thread",
         modelSelection: {
-          provider: "codex",
+          instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
         },
         runtimeMode: "full-access",

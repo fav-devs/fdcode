@@ -3,9 +3,11 @@ import {
   DEFAULT_SERVER_SETTINGS,
   type DesktopBridge,
   EnvironmentId,
-  type GitStatusResult,
+  type VcsStatusResult,
   ProjectId,
   type OrchestrationShellStreamItem,
+  ProviderDriverKind,
+  ProviderInstanceId,
   type ServerConfig,
   type ServerProvider,
   type TerminalAttachStreamEvent,
@@ -34,7 +36,7 @@ function registerListener<T>(listeners: Set<(event: T) => void>, listener: (even
 const terminalAttachListeners = new Set<(event: TerminalAttachStreamEvent) => void>();
 const terminalMetadataListeners = new Set<(event: TerminalMetadataStreamEvent) => void>();
 const shellStreamListeners = new Set<(event: OrchestrationShellStreamItem) => void>();
-const gitStatusListeners = new Set<(event: GitStatusResult) => void>();
+const gitStatusListeners = new Set<(event: VcsStatusResult) => void>();
 
 const rpcClientMock = {
   dispose: vi.fn(),
@@ -63,22 +65,29 @@ const rpcClientMock = {
   filesystem: {
     browse: vi.fn(),
   },
+  sourceControl: {
+    lookupRepository: vi.fn(),
+    cloneRepository: vi.fn(),
+    publishRepository: vi.fn(),
+  },
   shell: {
     openInEditor: vi.fn(),
   },
-  git: {
+  vcs: {
     pull: vi.fn(),
     refreshStatus: vi.fn(),
-    onStatus: vi.fn((input: { cwd: string }, listener: (event: GitStatusResult) => void) =>
+    onStatus: vi.fn((input: { cwd: string }, listener: (event: VcsStatusResult) => void) =>
       registerListener(gitStatusListeners, listener),
     ),
-    runStackedAction: vi.fn(),
-    listBranches: vi.fn(),
+    listRefs: vi.fn(),
     createWorktree: vi.fn(),
     removeWorktree: vi.fn(),
-    createBranch: vi.fn(),
-    checkout: vi.fn(),
+    createRef: vi.fn(),
+    switchRef: vi.fn(),
     init: vi.fn(),
+  },
+  git: {
+    runStackedAction: vi.fn(),
     resolvePullRequest: vi.fn(),
     preparePullRequestThread: vi.fn(),
     getReviewDiffs: vi.fn(),
@@ -240,7 +249,8 @@ function makeDesktopBridge(overrides: Partial<DesktopBridge> = {}): DesktopBridg
 
 const defaultProviders: ReadonlyArray<ServerProvider> = [
   {
-    provider: "codex",
+    instanceId: ProviderInstanceId.make("codex"),
+    driver: ProviderDriverKind.make("codex"),
     enabled: true,
     installed: true,
     version: "0.116.0",
@@ -289,11 +299,11 @@ const baseServerConfig: ServerConfig = {
   settings: DEFAULT_SERVER_SETTINGS,
 };
 
-const baseGitStatus: GitStatusResult = {
+const baseGitStatus: VcsStatusResult = {
   isRepo: true,
-  hasOriginRemote: true,
-  isDefaultBranch: false,
-  branch: "feature/streamed",
+  hasPrimaryRemote: true,
+  isDefaultRef: false,
+  refName: "feature/streamed",
   hasWorkingTreeChanges: false,
   workingTree: { files: [], insertions: 0, deletions: 0 },
   hasUpstream: true,
@@ -380,7 +390,7 @@ describe("wsApi", () => {
         title: "Project",
         workspaceRoot: "/tmp/workspace",
         defaultModelSelection: {
-          provider: "codex",
+          instanceId: ProviderInstanceId.make("codex"),
           model: "gpt-5-codex",
         },
         scripts: [],
@@ -401,24 +411,24 @@ describe("wsApi", () => {
     const api = createEnvironmentApi(rpcClientMock as never);
     const onStatus = vi.fn();
 
-    api.git.onStatus({ cwd: "/repo" }, onStatus);
+    api.vcs.onStatus({ cwd: "/repo" }, onStatus);
 
     const gitStatus = baseGitStatus;
     emitEvent(gitStatusListeners, gitStatus);
 
-    expect(rpcClientMock.git.onStatus).toHaveBeenCalledWith({ cwd: "/repo" }, onStatus, undefined);
+    expect(rpcClientMock.vcs.onStatus).toHaveBeenCalledWith({ cwd: "/repo" }, onStatus, undefined);
     expect(onStatus).toHaveBeenCalledWith(gitStatus);
   });
 
   it("forwards git status refreshes directly to the RPC client", async () => {
-    rpcClientMock.git.refreshStatus.mockResolvedValue(baseGitStatus);
+    rpcClientMock.vcs.refreshStatus.mockResolvedValue(baseGitStatus);
     const { createEnvironmentApi } = await import("./environmentApi");
 
     const api = createEnvironmentApi(rpcClientMock as never);
 
-    await api.git.refreshStatus({ cwd: "/repo" });
+    await api.vcs.refreshStatus({ cwd: "/repo" });
 
-    expect(rpcClientMock.git.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
+    expect(rpcClientMock.vcs.refreshStatus).toHaveBeenCalledWith({ cwd: "/repo" });
   });
 
   it("forwards local process stop requests directly to the RPC client", async () => {
@@ -460,7 +470,7 @@ describe("wsApi", () => {
       title: "Project",
       workspaceRoot: "/tmp/project",
       defaultModelSelection: {
-        provider: "codex",
+        instanceId: ProviderInstanceId.make("codex"),
         model: "gpt-5-codex",
       },
       createdAt: "2026-02-24T00:00:00.000Z",
@@ -595,10 +605,13 @@ describe("wsApi", () => {
 
   it("reads and writes persistence through the desktop bridge when available", async () => {
     const clientSettings = {
+      autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],
+      providerModelPreferences: {},
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,
@@ -653,10 +666,13 @@ describe("wsApi", () => {
     const { createLocalApi } = await import("./localApi");
     const api = createLocalApi(rpcClientMock as never);
     const clientSettings = {
+      autoOpenPlanSidebar: false,
       confirmThreadArchive: true,
       confirmThreadDelete: false,
+      diffIgnoreWhitespace: true,
       diffWordWrap: true,
       favorites: [],
+      providerModelPreferences: {},
       sidebarProjectGroupingMode: "repository_path" as const,
       sidebarProjectGroupingOverrides: {
         "environment-local:/tmp/project": "separate" as const,

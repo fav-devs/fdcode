@@ -152,10 +152,7 @@ function ComposerMentionDecorator(props: { path: string }) {
   return (
     <Tooltip>
       <TooltipTrigger render={chip} />
-      <TooltipPopup
-        side="top"
-        className="max-w-[30rem] whitespace-normal leading-tight wrap-anywhere"
-      >
+      <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight wrap-anywhere">
         {props.path}
       </TooltipPopup>
     </Tooltip>
@@ -275,7 +272,7 @@ function ComposerSkillDecorator(props: { skillLabel: string; skillDescription: s
   return (
     <Tooltip>
       <TooltipTrigger render={chip} />
-      <TooltipPopup side="top" className="max-w-[30rem] whitespace-normal leading-tight">
+      <TooltipPopup side="top" className="max-w-120 whitespace-normal leading-tight">
         {props.skillDescription}
       </TooltipPopup>
     </Tooltip>
@@ -876,7 +873,6 @@ export interface ComposerPromptEditorHandle {
   focus: () => void;
   focusAt: (cursor: number) => void;
   focusAtEnd: () => void;
-  isFocused: () => boolean;
   readSnapshot: () => {
     value: string;
     cursor: number;
@@ -1370,6 +1366,7 @@ function ComposerSurroundSelectionPlugin(props: {
     const onCompositionEnd = () => {
       tryApplyDeadKeyBacktickSurround({ finalAttempt: true });
     };
+
     let activeRootElement: HTMLElement | null = null;
     const unregisterRootListener = editor.registerRootListener((rootElement, prevRootElement) => {
       prevRootElement?.removeEventListener("keydown", onKeyDown);
@@ -1479,7 +1476,7 @@ function ComposerPromptEditorInner({
       if (shouldRewriteEditorState) {
         $setComposerEditorPrompt(value, terminalContexts, skillMetadataRef.current);
       }
-      if (isFocused) {
+      if (shouldRewriteEditorState || isFocused) {
         $setSelectionAtComposerOffset(normalizedCursor);
       }
     });
@@ -1493,13 +1490,9 @@ function ComposerPromptEditorInner({
       const rootElement = editor.getRootElement();
       if (!rootElement) return;
       const boundedCursor = clampCollapsedComposerCursor(snapshotRef.current.value, nextCursor);
-      rootElement.focus();
-      isApplyingControlledUpdateRef.current = true;
+      rootElement.focus({ preventScroll: true });
       editor.update(() => {
         $setSelectionAtComposerOffset(boundedCursor);
-      });
-      queueMicrotask(() => {
-        isApplyingControlledUpdateRef.current = false;
       });
       snapshotRef.current = {
         value: snapshotRef.current.value,
@@ -1507,6 +1500,13 @@ function ComposerPromptEditorInner({
         expandedCursor: expandCollapsedComposerCursor(snapshotRef.current.value, boundedCursor),
         terminalContextIds: snapshotRef.current.terminalContextIds,
       };
+      onChangeRef.current(
+        snapshotRef.current.value,
+        boundedCursor,
+        snapshotRef.current.expandedCursor,
+        false,
+        snapshotRef.current.terminalContextIds,
+      );
     },
     [editor],
   );
@@ -1560,13 +1560,9 @@ function ComposerPromptEditorInner({
           ),
         );
       },
-      isFocused: () => {
-        const rootElement = editor.getRootElement();
-        return Boolean(rootElement && document.activeElement === rootElement);
-      },
       readSnapshot,
     }),
-    [editor, focusAt, readSnapshot],
+    [focusAt, readSnapshot],
   );
 
   const handleEditorChange = useCallback((editorState: EditorState) => {
@@ -1625,7 +1621,7 @@ function ComposerPromptEditorInner({
           contentEditable={
             <ContentEditable
               className={cn(
-                "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap break-words bg-transparent text-[14px] leading-relaxed text-foreground focus:outline-none",
+                "block max-h-[200px] min-h-17.5 w-full overflow-y-auto whitespace-pre-wrap wrap-break-word bg-transparent text-[16px] leading-relaxed text-foreground focus:outline-none sm:text-[14px]",
                 className,
               )}
               data-testid="composer-editor"
@@ -1636,7 +1632,7 @@ function ComposerPromptEditorInner({
           }
           placeholder={
             terminalContexts.length > 0 ? null : (
-              <div className="pointer-events-none absolute inset-0 text-[14px] leading-relaxed text-muted-foreground/35">
+              <div className="pointer-events-none absolute inset-0 text-[16px] leading-relaxed text-muted-foreground/35 sm:text-[14px]">
                 {placeholder}
               </div>
             )

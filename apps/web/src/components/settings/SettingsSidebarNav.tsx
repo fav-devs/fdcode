@@ -1,6 +1,6 @@
-import type { ComponentType } from "react";
-import { ActivityIcon, ArchiveIcon, ArrowLeftIcon, Link2Icon, Settings2Icon } from "lucide-react";
-import { useNavigate } from "@tanstack/react-router";
+import { useCallback, type ComponentType } from "react";
+import { ArchiveIcon, ArrowLeftIcon, GitBranchIcon, Link2Icon, Settings2Icon } from "lucide-react";
+import { useCanGoBack, useNavigate } from "@tanstack/react-router";
 
 import {
   SidebarContent,
@@ -10,48 +10,49 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarSeparator,
+  useSidebar,
 } from "../ui/sidebar";
 
 export type SettingsSectionPath =
   | "/settings/general"
-  | "/settings/usage"
+  | "/settings/source-control"
   | "/settings/connections"
   | "/settings/archived";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   label: string;
-  description: string;
   to: SettingsSectionPath;
   icon: ComponentType<{ className?: string }>;
 }> = [
-  {
-    label: "General",
-    description: "Theme, behavior, and defaults.",
-    to: "/settings/general",
-    icon: Settings2Icon,
-  },
-  {
-    label: "Usage",
-    description: "Provider usage windows and remaining quota.",
-    to: "/settings/usage",
-    icon: ActivityIcon,
-  },
-  {
-    label: "Connections",
-    description: "Pairing, remote backends, and sessions.",
-    to: "/settings/connections",
-    icon: Link2Icon,
-  },
-  {
-    label: "Archive",
-    description: "Review and restore archived threads.",
-    to: "/settings/archived",
-    icon: ArchiveIcon,
-  },
+  { label: "General", to: "/settings/general", icon: Settings2Icon },
+  { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
+  { label: "Connections", to: "/settings/connections", icon: Link2Icon },
+  { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 
 export function SettingsSidebarNav({ pathname }: { pathname: string }) {
   const navigate = useNavigate();
+  const canGoBack = useCanGoBack();
+  const { isMobile, setOpenMobile } = useSidebar();
+  const handleSectionClick = useCallback(
+    (to: SettingsSectionPath) => {
+      if (isMobile) {
+        setOpenMobile(false);
+      }
+      void navigate({ to, replace: true });
+    },
+    [isMobile, navigate, setOpenMobile],
+  );
+  const handleBackClick = useCallback(() => {
+    if (isMobile) {
+      setOpenMobile(false);
+    }
+    if (canGoBack) {
+      window.history.back();
+      return;
+    }
+    void navigate({ to: "/" });
+  }, [canGoBack, isMobile, navigate, setOpenMobile]);
 
   return (
     <>
@@ -68,21 +69,19 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
                     isActive={isActive}
                     className={
                       isActive
-                        ? "h-auto items-start gap-2.5 rounded-2xl border border-border/60 bg-background/72 px-3 py-3 text-left text-[13px] font-medium text-foreground shadow-sm backdrop-blur"
-                        : "h-auto items-start gap-2.5 rounded-2xl px-3 py-3 text-left text-[13px] text-muted-foreground/74 hover:bg-background/44 hover:text-foreground/84"
+                        ? "gap-2.5 px-2.5 py-2 text-left text-[13px] font-medium text-foreground"
+                        : "gap-2.5 px-2.5 py-2 text-left text-[13px] text-muted-foreground/70 hover:text-foreground/80"
                     }
-                    onClick={() => void navigate({ to: item.to, replace: true })}
+                    onClick={() => handleSectionClick(item.to)}
                   >
                     <Icon
                       className={
                         isActive
-                          ? "mt-0.5 size-4 shrink-0 text-foreground"
-                          : "mt-0.5 size-4 shrink-0 text-muted-foreground/58"
+                          ? "size-4 shrink-0 text-foreground"
+                          : "size-4 shrink-0 text-muted-foreground/60"
                       }
                     />
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate">{item.label}</div>
-                    </div>
+                    <span className="truncate">{item.label}</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               );
@@ -98,7 +97,7 @@ export function SettingsSidebarNav({ pathname }: { pathname: string }) {
             <SidebarMenuButton
               size="sm"
               className="gap-2 px-2 py-2 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-              onClick={() => window.history.back()}
+              onClick={handleBackClick}
             >
               <ArrowLeftIcon className="size-4" />
               <span>Back</span>

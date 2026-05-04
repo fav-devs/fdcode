@@ -1,6 +1,7 @@
 export * from "./knownEnvironment.ts";
 export * from "./reconnectBackoff.ts";
 export * from "./scoped.ts";
+<<<<<<< HEAD
 export * from "./environmentRuntimeState.ts";
 export * from "./shellTypes.ts";
 export * from "./shellSnapshotReducer.ts";
@@ -17,3 +18,6 @@ export * from "./wsRpcProtocol.ts";
 export * from "./wsTransport.ts";
 export * from "./wsRpcClient.ts";
 export * from "./environmentConnection.ts";
+=======
+export * from "./sourceControlDiscoveryState.ts";
+>>>>>>> upstream/main

@@ -11,18 +11,19 @@ import {
   type DesktopUpdateState,
   type LocalApi,
   type ServerConfig,
-  type ServerProvider,
+  type SourceControlDiscoveryResult,
 } from "@t3tools/contracts";
-import { DateTime } from "effect";
+import { DateTime, Option } from "effect";
 import { page } from "vitest/browser";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render } from "vitest-browser-react";
 
 import { __resetLocalApiForTests } from "../../localApi";
-import { AppAtomRegistryProvider } from "../../rpc/atomRegistry";
+import { AppAtomRegistryProvider, resetAppAtomRegistryForTests } from "../../rpc/atomRegistry";
 import { resetServerStateForTests, setServerConfigSnapshot } from "../../rpc/serverState";
 import { ConnectionsSettings } from "./ConnectionsSettings";
-import { GeneralSettingsPanel, UsageSettingsPanel } from "./SettingsPanels";
+import { GeneralSettingsPanel } from "./SettingsPanels";
+import { SourceControlSettingsPanel } from "./SourceControlSettings";
 
 const authAccessHarness = vi.hoisted(() => {
   type Snapshot = AuthAccessSnapshot;
@@ -202,28 +203,6 @@ function createBaseServerConfig(): ServerConfig {
   };
 }
 
-function makeProvider(
-  provider: ServerProvider["provider"],
-  overrides?: Partial<ServerProvider>,
-): ServerProvider {
-  return {
-    provider,
-    enabled: true,
-    installed: true,
-    version: "1.0.0",
-    status: "ready",
-    auth: {
-      status: "authenticated",
-      label: provider === "codex" ? "ChatGPT Pro Subscription" : "Claude Max Subscription",
-    },
-    checkedAt: "2036-04-07T00:00:00.000Z",
-    models: [],
-    slashCommands: [],
-    skills: [],
-    ...overrides,
-  };
-}
-
 function makeUtc(value: string) {
   return DateTime.makeUnsafe(Date.parse(value));
 }
@@ -309,13 +288,6 @@ const createDesktopBridgeStub = (overrides?: {
       wsBaseUrl: "ws://127.0.0.1:3773",
       bootstrapToken: "desktop-bootstrap-token",
     }),
-    getPrimaryEnvironmentBinding: () => ({
-      kind: "embedded",
-      label: "Local environment",
-      httpBaseUrl: "http://127.0.0.1:3773",
-      wsBaseUrl: "ws://127.0.0.1:3773",
-      bootstrapToken: "desktop-bootstrap-token",
-    }),
     getClientSettings: vi.fn().mockResolvedValue(null),
     setClientSettings: vi.fn().mockResolvedValue(undefined),
     getSavedEnvironmentRegistry: vi.fn().mockResolvedValue([]),
@@ -323,27 +295,6 @@ const createDesktopBridgeStub = (overrides?: {
     getSavedEnvironmentSecret: vi.fn().mockResolvedValue(null),
     setSavedEnvironmentSecret: vi.fn().mockResolvedValue(true),
     removeSavedEnvironmentSecret: vi.fn().mockResolvedValue(undefined),
-    getPrimaryBackendState: vi.fn().mockResolvedValue({
-      mode: "embedded",
-      environmentId: null,
-      label: "Local environment",
-      httpBaseUrl: "http://127.0.0.1:3773",
-      wsBaseUrl: "ws://127.0.0.1:3773",
-    }),
-    useSavedEnvironmentAsPrimaryBackend: vi.fn().mockResolvedValue({
-      mode: "saved-environment",
-      environmentId: "environment-remote",
-      label: "Remote environment",
-      httpBaseUrl: "https://remote.example.com",
-      wsBaseUrl: "wss://remote.example.com",
-    }),
-    useEmbeddedBackendAsPrimary: vi.fn().mockResolvedValue({
-      mode: "embedded",
-      environmentId: null,
-      label: "Local environment",
-      httpBaseUrl: "http://127.0.0.1:3773",
-      wsBaseUrl: "ws://127.0.0.1:3773",
-    }),
     getServerExposureState: vi.fn().mockResolvedValue(
       overrides?.serverExposureState ?? {
         mode: "local-only",
@@ -485,7 +436,7 @@ describe("GeneralSettingsPanel observability", () => {
 
     mounted = await render(
       <AppAtomRegistryProvider>
-        <UsageSettingsPanel />
+        <GeneralSettingsPanel />
       </AppAtomRegistryProvider>,
     );
 
@@ -504,195 +455,6 @@ describe("GeneralSettingsPanel observability", () => {
       .toBeInTheDocument();
   });
 
-  it("renders two provider usage bars when usage is available", async () => {
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("codex", {
-          usageLimits: {
-            source: "codexAppServer",
-            available: true,
-            checkedAt: "2036-04-07T00:00:00.000Z",
-            windows: [
-              {
-                kind: "session",
-                label: "Session",
-                usedPercent: 42,
-                resetsAt: "2036-04-07T02:00:00.000Z",
-              },
-              {
-                kind: "weekly",
-                label: "Weekly",
-                usedPercent: 65,
-                resetsAt: "2036-04-10T00:00:00.000Z",
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    mounted = await render(
-      <AppAtomRegistryProvider>
-        <UsageSettingsPanel />
-      </AppAtomRegistryProvider>,
-    );
-
-    await expect.element(page.getByLabelText("Session usage 42%")).toBeInTheDocument();
-    await expect.element(page.getByLabelText("Weekly usage 65%")).toBeInTheDocument();
-  });
-
-  it("renders unavailable usage text when quota data is unavailable", async () => {
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("claudeAgent", {
-          usageLimits: {
-            source: "claudeStatusProbe",
-            available: false,
-            checkedAt: "2036-04-07T00:00:00.000Z",
-            reason: "Unable to fetch usage",
-            windows: [],
-          },
-        }),
-      ],
-    });
-
-    mounted = await render(
-      <AppAtomRegistryProvider>
-        <UsageSettingsPanel />
-      </AppAtomRegistryProvider>,
-    );
-
-    await expect.element(page.getByText("Unable to fetch usage")).toBeInTheDocument();
-  });
-
-  it("renders multiple OpenCode managed usage windows when both subscriptions exist", async () => {
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("opencode", {
-          usageLimits: {
-            source: "opencodeManaged",
-            available: true,
-            checkedAt: "2036-04-07T00:00:00.000Z",
-            windows: [
-              {
-                kind: "session",
-                label: "OpenCode Go",
-                usedPercent: 20,
-              },
-              {
-                kind: "session",
-                label: "OpenCode Zen",
-                usedPercent: 40,
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    mounted = await render(
-      <AppAtomRegistryProvider>
-        <UsageSettingsPanel />
-      </AppAtomRegistryProvider>,
-    );
-
-    await expect.element(page.getByLabelText("OpenCode Go usage 20%")).toBeInTheDocument();
-    await expect.element(page.getByLabelText("OpenCode Zen usage 40%")).toBeInTheDocument();
-  });
-
-  it("hides provider usage UI for disabled or missing providers", async () => {
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("codex", {
-          enabled: false,
-          installed: false,
-          status: "disabled",
-          auth: { status: "unknown" },
-          usageLimits: {
-            source: "codexAppServer",
-            available: true,
-            checkedAt: "2036-04-07T00:00:00.000Z",
-            windows: [
-              {
-                kind: "session",
-                label: "Session",
-                usedPercent: 50,
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    mounted = await render(
-      <AppAtomRegistryProvider>
-        <UsageSettingsPanel />
-      </AppAtomRegistryProvider>,
-    );
-
-    await expect.element(page.getByLabelText("Enable Codex")).toBeInTheDocument();
-    await expect.element(page.getByLabelText("Session usage 50%")).not.toBeInTheDocument();
-  });
-
-  it("updates provider usage bars when provider snapshots refresh", async () => {
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("codex", {
-          usageLimits: {
-            source: "codexAppServer",
-            available: true,
-            checkedAt: "2036-04-07T00:00:00.000Z",
-            windows: [
-              {
-                kind: "session",
-                label: "Session",
-                usedPercent: 88,
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    mounted = await render(
-      <AppAtomRegistryProvider>
-        <GeneralSettingsPanel />
-      </AppAtomRegistryProvider>,
-    );
-
-    const warningBar = page.getByLabelText("Session usage 88%");
-    await expect.element(warningBar).toBeInTheDocument();
-    await expect.element(warningBar).toHaveClass(/bg-warning/);
-
-    setServerConfigSnapshot({
-      ...createBaseServerConfig(),
-      providers: [
-        makeProvider("codex", {
-          usageLimits: {
-            source: "codexAppServer",
-            available: true,
-            checkedAt: "2036-04-07T01:00:00.000Z",
-            windows: [
-              {
-                kind: "session",
-                label: "Session",
-                usedPercent: 93,
-              },
-            ],
-          },
-        }),
-      ],
-    });
-
-    const dangerBar = page.getByLabelText("Session usage 93%");
-    await expect.element(dangerBar).toBeInTheDocument();
-    await expect.element(dangerBar).toHaveClass(/bg-destructive/);
-  });
   it("creates and shows a pairing link when network access is enabled", async () => {
     window.desktopBridge = createDesktopBridgeStub({
       serverExposureState: {
@@ -909,7 +671,7 @@ describe("GeneralSettingsPanel observability", () => {
     await networkAccessToggle.click();
     await expect.element(page.getByText("Enable network access?")).toBeInTheDocument();
     await expect
-      .element(page.getByText("fd code will restart to expose this environment over the network."))
+      .element(page.getByText("T3 Code will restart to expose this environment over the network."))
       .toBeInTheDocument();
     await page.getByRole("button", { name: "Restart and enable", exact: true }).click();
     await vi.waitFor(() => {
@@ -953,9 +715,158 @@ describe("GeneralSettingsPanel observability", () => {
 
     await page.getByLabelText("Toggle OpenCode details").click();
 
-    await expect.element(page.getByText("OpenCode server URL")).toBeInTheDocument();
+    // The unified provider-instance card renders field labels without a
+    // driver-name prefix (the driver name is already shown in the card
+    // header), so the labels read "Server URL" / "Server password"
+    // rather than the old "OpenCode server URL" / "OpenCode server password".
+    await expect.element(page.getByText("Server URL")).toBeInTheDocument();
     await expect.element(page.getByPlaceholder("http://127.0.0.1:4096")).toBeInTheDocument();
-    await expect.element(page.getByText("OpenCode server password")).toBeInTheDocument();
-    await expect.element(page.getByPlaceholder("Server password")).toBeInTheDocument();
+    await expect.element(page.getByText("Server password")).toBeInTheDocument();
+    await expect.element(page.getByPlaceholder("Optional")).toBeInTheDocument();
+  });
+});
+
+describe("SourceControlSettingsPanel discovery states", () => {
+  let mounted:
+    | (Awaited<ReturnType<typeof render>> & {
+        cleanup?: () => Promise<void>;
+        unmount?: () => Promise<void>;
+      })
+    | null = null;
+
+  beforeEach(async () => {
+    resetAppAtomRegistryForTests();
+    await __resetLocalApiForTests();
+    document.body.innerHTML = "";
+  });
+
+  afterEach(async () => {
+    if (mounted) {
+      const teardown = mounted.cleanup ?? mounted.unmount;
+      await teardown?.call(mounted).catch(() => {});
+    }
+    mounted = null;
+    Reflect.deleteProperty(window, "nativeApi");
+    document.body.innerHTML = "";
+    await __resetLocalApiForTests();
+    resetAppAtomRegistryForTests();
+  });
+
+  function setSourceControlDiscoveryStub(
+    discoverSourceControl: () => Promise<SourceControlDiscoveryResult>,
+  ) {
+    window.nativeApi = {
+      server: {
+        discoverSourceControl,
+      },
+    } as LocalApi;
+  }
+
+  it("shows skeleton sections while the first source control scan is pending", async () => {
+    setSourceControlDiscoveryStub(() => new Promise(() => {}));
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("Version Control")).toBeInTheDocument();
+    await expect.element(page.getByText("Source Control Providers")).toBeInTheDocument();
+    await expect
+      .element(page.getByRole("button", { name: "Scan source control tools" }))
+      .toBeDisabled();
+    await expect.element(page.getByText("No source control tools found")).not.toBeInTheDocument();
+  });
+
+  it("uses the shared empty state when discovery completes without tools", async () => {
+    setSourceControlDiscoveryStub(async () => ({
+      versionControlSystems: [],
+      sourceControlProviders: [],
+    }));
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByText("No source control tools found")).toBeInTheDocument();
+    await expect
+      .element(page.getByText("Install a supported Git or pull request CLI, then scan again."))
+      .toBeInTheDocument();
+    await expect.element(page.getByRole("button", { name: "Scan" })).toBeInTheDocument();
+  });
+
+  it("keeps discovered rows instead of showing the empty state", async () => {
+    setSourceControlDiscoveryStub(async () => ({
+      versionControlSystems: [
+        {
+          kind: "git",
+          label: "Git",
+          executable: "git",
+          implemented: true,
+          status: "available",
+          version: Option.some("git version 2.50.0"),
+          installHint: "Install Git.",
+          detail: Option.none(),
+        },
+      ],
+      sourceControlProviders: [],
+    }));
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    await expect.element(page.getByText("No source control tools found")).not.toBeInTheDocument();
+  });
+
+  it("does not rescan on remount while the discovery atom is fresh", async () => {
+    let calls = 0;
+    setSourceControlDiscoveryStub(async () => {
+      calls += 1;
+      return {
+        versionControlSystems: [
+          {
+            kind: "git",
+            label: "Git",
+            executable: "git",
+            implemented: true,
+            status: "available",
+            version: Option.some("git version 2.50.0"),
+            installHint: "Install Git.",
+            detail: Option.none(),
+          },
+        ],
+        sourceControlProviders: [],
+      };
+    });
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    expect(calls).toBe(1);
+
+    const teardown = mounted.cleanup ?? mounted.unmount;
+    await teardown?.call(mounted).catch(() => {});
+    mounted = null;
+    document.body.innerHTML = "";
+
+    mounted = await render(
+      <AppAtomRegistryProvider>
+        <SourceControlSettingsPanel />
+      </AppAtomRegistryProvider>,
+    );
+
+    await expect.element(page.getByRole("heading", { name: "Git" })).toBeInTheDocument();
+    expect(calls).toBe(1);
   });
 });

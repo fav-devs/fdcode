@@ -1,15 +1,15 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo } from "react";
+import ChatView from "../components/ChatView";
 import { threadHasStarted } from "../components/ChatView.logic";
 import { useComposerDraftStore, DraftId } from "../composerDraftStore";
+import { SidebarInset } from "../components/ui/sidebar";
 import { createThreadSelectorAcrossEnvironments } from "../storeSelectors";
 import { useStore } from "../store";
 import { buildThreadRouteParams } from "../threadRoutes";
-import { useWorkspaceStore } from "../workspace/store";
 
 function DraftChatThreadRouteView() {
   const navigate = useNavigate();
-  const openThreadSurface = useWorkspaceStore((state) => state.openThreadSurface);
   const { draftId: rawDraftId } = Route.useParams();
   const draftId = DraftId.make(rawDraftId);
   const draftSession = useComposerDraftStore((store) => store.getDraftSession(draftId));
@@ -53,31 +53,32 @@ function DraftChatThreadRouteView() {
     void navigate({ to: "/", replace: true });
   }, [canonicalThreadRef, draftSession, navigate]);
 
-  useEffect(() => {
-    if (!draftSession || canonicalThreadRef) {
-      return;
-    }
-
-    openThreadSurface(
-      {
-        scope: "draft",
-        draftId,
-        environmentId: draftSession.environmentId,
-        threadId: draftSession.threadId,
-      },
-      "focus-or-replace",
-    );
-  }, [canonicalThreadRef, draftId, draftSession, openThreadSurface]);
-
   if (canonicalThreadRef) {
-    return null;
+    return (
+      <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+        <ChatView
+          environmentId={canonicalThreadRef.environmentId}
+          threadId={canonicalThreadRef.threadId}
+          routeKind="server"
+        />
+      </SidebarInset>
+    );
   }
 
   if (!draftSession) {
     return null;
   }
 
-  return null;
+  return (
+    <SidebarInset className="h-svh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground md:h-dvh">
+      <ChatView
+        draftId={draftId}
+        environmentId={draftSession.environmentId}
+        threadId={draftSession.threadId}
+        routeKind="draft"
+      />
+    </SidebarInset>
+  );
 }
 
 export const Route = createFileRoute("/_chat/draft/$draftId")({

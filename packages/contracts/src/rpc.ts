@@ -11,30 +11,28 @@ import {
 } from "./filesystem.ts";
 import {
   GitActionProgressEvent,
-  GitCheckoutInput,
-  GitCheckoutResult,
+  VcsSwitchRefInput,
+  VcsSwitchRefResult,
   GitCommandError,
-  GitCreateBranchInput,
-  GitCreateBranchResult,
-  GitCreateWorktreeInput,
-  GitCreateWorktreeResult,
-  GitInitInput,
-  GitListBranchesInput,
-  GitListBranchesResult,
+  VcsCreateRefInput,
+  VcsCreateRefResult,
+  VcsCreateWorktreeInput,
+  VcsCreateWorktreeResult,
+  VcsInitInput,
+  VcsListRefsInput,
+  VcsListRefsResult,
   GitManagerServiceError,
   GitPreparePullRequestThreadInput,
   GitPreparePullRequestThreadResult,
-  GitPullInput,
+  VcsPullInput,
   GitPullRequestRefInput,
-  GitPullResult,
-  GitRemoveWorktreeInput,
-  GitReviewDiffsInput,
-  GitReviewDiffsResult,
+  VcsPullResult,
+  VcsRemoveWorktreeInput,
   GitResolvePullRequestResult,
   GitRunStackedActionInput,
-  GitStatusInput,
-  GitStatusResult,
-  GitStatusStreamEvent,
+  VcsStatusInput,
+  VcsStatusResult,
+  VcsStatusStreamEvent,
 } from "./git.ts";
 import { KeybindingsConfigError } from "./keybindings.ts";
 import {
@@ -50,39 +48,20 @@ import {
   OrchestrationReplayEventsInput,
   OrchestrationRpcSchemas,
 } from "./orchestration.ts";
+import { ProviderInstanceId } from "./providerInstance.ts";
 import {
-  ProjectListDirectoriesError,
-  ProjectListDirectoriesInput,
-  ProjectListDirectoriesResult,
-  ProjectReadFileError,
-  ProjectReadFileInput,
-  ProjectReadFileResult,
   ProjectSearchEntriesError,
   ProjectSearchEntriesInput,
   ProjectSearchEntriesResult,
-  ProjectSearchLocalEntriesError,
-  ProjectSearchLocalEntriesInput,
-  ProjectSearchLocalEntriesResult,
   ProjectWriteFileError,
   ProjectWriteFileInput,
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
-  LocalProcessProbePortsError,
-  LocalProcessProbePortsInput,
-  LocalProcessProbePortsResult,
-  LocalProcessStopPortsError,
-  LocalProcessStopPortsInput,
-  LocalProcessStopPortsResult,
-} from "./localProcess.ts";
-import {
-  TerminalAttachInput,
-  TerminalAttachStreamEvent,
   TerminalClearInput,
   TerminalCloseInput,
   TerminalError,
   TerminalEvent,
-  TerminalMetadataStreamEvent,
   TerminalOpenInput,
   TerminalResizeInput,
   TerminalRestartInput,
@@ -94,20 +73,21 @@ import {
   ServerConfig,
   ServerLifecycleStreamEvent,
   ServerProviderUpdatedPayload,
-  ServerResourceStatsEvent,
   ServerUpsertKeybindingInput,
   ServerUpsertKeybindingResult,
 } from "./server.ts";
 import { ServerSettings, ServerSettingsError, ServerSettingsPatch } from "./settings.ts";
 import {
-  PortForward,
-  PortForwardMetadataStreamEvent,
-  PortsDetectInput,
-  PortsDetectResult,
-  PortsError,
-  PortsForwardCreateInput,
-  PortsForwardRemoveInput,
-} from "./ports.ts";
+  SourceControlCloneRepositoryInput,
+  SourceControlCloneRepositoryResult,
+  SourceControlDiscoveryResult,
+  SourceControlPublishRepositoryInput,
+  SourceControlPublishRepositoryResult,
+  SourceControlRepositoryError,
+  SourceControlRepositoryInfo,
+  SourceControlRepositoryLookupInput,
+} from "./sourceControl.ts";
+import { VcsError } from "./vcs.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -115,10 +95,7 @@ export const WS_METHODS = {
   projectsAdd: "projects.add",
   projectsRemove: "projects.remove",
   projectsSearchEntries: "projects.searchEntries",
-  projectsSearchLocalEntries: "projects.searchLocalEntries",
-  projectsListDirectories: "projects.listDirectories",
   projectsWriteFile: "projects.writeFile",
-  projectsReadFile: "projects.readFile",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -126,32 +103,28 @@ export const WS_METHODS = {
   // Filesystem methods
   filesystemBrowse: "filesystem.browse",
 
-  // Git methods
-  gitPull: "git.pull",
-  gitRefreshStatus: "git.refreshStatus",
+  // VCS methods
+  vcsPull: "vcs.pull",
+  vcsRefreshStatus: "vcs.refreshStatus",
+  vcsListRefs: "vcs.listRefs",
+  vcsCreateWorktree: "vcs.createWorktree",
+  vcsRemoveWorktree: "vcs.removeWorktree",
+  vcsCreateRef: "vcs.createRef",
+  vcsSwitchRef: "vcs.switchRef",
+  vcsInit: "vcs.init",
+
+  // Git workflow methods
   gitRunStackedAction: "git.runStackedAction",
-  gitListBranches: "git.listBranches",
-  gitCreateWorktree: "git.createWorktree",
-  gitRemoveWorktree: "git.removeWorktree",
-  gitCreateBranch: "git.createBranch",
-  gitCheckout: "git.checkout",
-  gitInit: "git.init",
   gitResolvePullRequest: "git.resolvePullRequest",
   gitPreparePullRequestThread: "git.preparePullRequestThread",
-  gitGetReviewDiffs: "git.getReviewDiffs",
 
   // Terminal methods
   terminalOpen: "terminal.open",
-  terminalAttach: "terminal.attach",
   terminalWrite: "terminal.write",
   terminalResize: "terminal.resize",
   terminalClear: "terminal.clear",
   terminalRestart: "terminal.restart",
   terminalClose: "terminal.close",
-
-  // Local process methods
-  localProcessStopPorts: "localProcess.stopPorts",
-  localProcessProbePorts: "localProcess.probePorts",
 
   // Server meta
   serverGetConfig: "server.getConfig",
@@ -159,21 +132,19 @@ export const WS_METHODS = {
   serverUpsertKeybinding: "server.upsertKeybinding",
   serverGetSettings: "server.getSettings",
   serverUpdateSettings: "server.updateSettings",
+  serverDiscoverSourceControl: "server.discoverSourceControl",
 
-  // Port forwarding methods
-  portsDetect: "ports.detect",
-  portsForwardCreate: "ports.forward.create",
-  portsForwardRemove: "ports.forward.remove",
-  subscribePortForwards: "subscribePortForwards",
+  // Source control methods
+  sourceControlLookupRepository: "sourceControl.lookupRepository",
+  sourceControlCloneRepository: "sourceControl.cloneRepository",
+  sourceControlPublishRepository: "sourceControl.publishRepository",
 
   // Streaming subscriptions
-  subscribeGitStatus: "subscribeGitStatus",
+  subscribeVcsStatus: "subscribeVcsStatus",
   subscribeTerminalEvents: "subscribeTerminalEvents",
-  subscribeTerminalMetadata: "subscribeTerminalMetadata",
   subscribeServerConfig: "subscribeServerConfig",
   subscribeServerLifecycle: "subscribeServerLifecycle",
   subscribeAuthAccess: "subscribeAuthAccess",
-  subscribeResourceStats: "subscribeResourceStats",
 } as const;
 
 export const WsServerUpsertKeybindingRpc = Rpc.make(WS_METHODS.serverUpsertKeybinding, {
@@ -189,7 +160,15 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
 });
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
-  payload: Schema.Struct({}),
+  payload: Schema.Struct({
+    /**
+     * When supplied, only refresh this specific provider instance. When
+     * omitted, refresh all configured instances — the legacy `refresh()`
+     * behaviour retained for transports that still dispatch untargeted
+     * refreshes.
+     */
+    instanceId: Schema.optional(ProviderInstanceId),
+  }),
   success: ServerProviderUpdatedPayload,
 });
 
@@ -205,34 +184,45 @@ export const WsServerUpdateSettingsRpc = Rpc.make(WS_METHODS.serverUpdateSetting
   error: ServerSettingsError,
 });
 
+export const WsServerDiscoverSourceControlRpc = Rpc.make(WS_METHODS.serverDiscoverSourceControl, {
+  payload: Schema.Struct({}),
+  success: SourceControlDiscoveryResult,
+});
+
+export const WsSourceControlLookupRepositoryRpc = Rpc.make(
+  WS_METHODS.sourceControlLookupRepository,
+  {
+    payload: SourceControlRepositoryLookupInput,
+    success: SourceControlRepositoryInfo,
+    error: SourceControlRepositoryError,
+  },
+);
+
+export const WsSourceControlCloneRepositoryRpc = Rpc.make(WS_METHODS.sourceControlCloneRepository, {
+  payload: SourceControlCloneRepositoryInput,
+  success: SourceControlCloneRepositoryResult,
+  error: SourceControlRepositoryError,
+});
+
+export const WsSourceControlPublishRepositoryRpc = Rpc.make(
+  WS_METHODS.sourceControlPublishRepository,
+  {
+    payload: SourceControlPublishRepositoryInput,
+    success: SourceControlPublishRepositoryResult,
+    error: SourceControlRepositoryError,
+  },
+);
+
 export const WsProjectsSearchEntriesRpc = Rpc.make(WS_METHODS.projectsSearchEntries, {
   payload: ProjectSearchEntriesInput,
   success: ProjectSearchEntriesResult,
   error: ProjectSearchEntriesError,
 });
 
-export const WsProjectsSearchLocalEntriesRpc = Rpc.make(WS_METHODS.projectsSearchLocalEntries, {
-  payload: ProjectSearchLocalEntriesInput,
-  success: ProjectSearchLocalEntriesResult,
-  error: ProjectSearchLocalEntriesError,
-});
-
-export const WsProjectsListDirectoriesRpc = Rpc.make(WS_METHODS.projectsListDirectories, {
-  payload: ProjectListDirectoriesInput,
-  success: ProjectListDirectoriesResult,
-  error: ProjectListDirectoriesError,
-});
-
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: ProjectWriteFileError,
-});
-
-export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
-  payload: ProjectReadFileInput,
-  success: ProjectReadFileResult,
-  error: ProjectReadFileError,
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -246,22 +236,22 @@ export const WsFilesystemBrowseRpc = Rpc.make(WS_METHODS.filesystemBrowse, {
   error: FilesystemBrowseError,
 });
 
-export const WsSubscribeGitStatusRpc = Rpc.make(WS_METHODS.subscribeGitStatus, {
-  payload: GitStatusInput,
-  success: GitStatusStreamEvent,
+export const WsSubscribeVcsStatusRpc = Rpc.make(WS_METHODS.subscribeVcsStatus, {
+  payload: VcsStatusInput,
+  success: VcsStatusStreamEvent,
   error: GitManagerServiceError,
   stream: true,
 });
 
-export const WsGitPullRpc = Rpc.make(WS_METHODS.gitPull, {
-  payload: GitPullInput,
-  success: GitPullResult,
+export const WsVcsPullRpc = Rpc.make(WS_METHODS.vcsPull, {
+  payload: VcsPullInput,
+  success: VcsPullResult,
   error: GitCommandError,
 });
 
-export const WsGitRefreshStatusRpc = Rpc.make(WS_METHODS.gitRefreshStatus, {
-  payload: GitStatusInput,
-  success: GitStatusResult,
+export const WsVcsRefreshStatusRpc = Rpc.make(WS_METHODS.vcsRefreshStatus, {
+  payload: VcsStatusInput,
+  success: VcsStatusResult,
   error: GitManagerServiceError,
 });
 
@@ -284,57 +274,44 @@ export const WsGitPreparePullRequestThreadRpc = Rpc.make(WS_METHODS.gitPreparePu
   error: GitManagerServiceError,
 });
 
-export const WsGitListBranchesRpc = Rpc.make(WS_METHODS.gitListBranches, {
-  payload: GitListBranchesInput,
-  success: GitListBranchesResult,
+export const WsVcsListRefsRpc = Rpc.make(WS_METHODS.vcsListRefs, {
+  payload: VcsListRefsInput,
+  success: VcsListRefsResult,
   error: GitCommandError,
 });
 
-export const WsGitCreateWorktreeRpc = Rpc.make(WS_METHODS.gitCreateWorktree, {
-  payload: GitCreateWorktreeInput,
-  success: GitCreateWorktreeResult,
+export const WsVcsCreateWorktreeRpc = Rpc.make(WS_METHODS.vcsCreateWorktree, {
+  payload: VcsCreateWorktreeInput,
+  success: VcsCreateWorktreeResult,
   error: GitCommandError,
 });
 
-export const WsGitRemoveWorktreeRpc = Rpc.make(WS_METHODS.gitRemoveWorktree, {
-  payload: GitRemoveWorktreeInput,
+export const WsVcsRemoveWorktreeRpc = Rpc.make(WS_METHODS.vcsRemoveWorktree, {
+  payload: VcsRemoveWorktreeInput,
   error: GitCommandError,
 });
 
-export const WsGitCreateBranchRpc = Rpc.make(WS_METHODS.gitCreateBranch, {
-  payload: GitCreateBranchInput,
-  success: GitCreateBranchResult,
+export const WsVcsCreateRefRpc = Rpc.make(WS_METHODS.vcsCreateRef, {
+  payload: VcsCreateRefInput,
+  success: VcsCreateRefResult,
   error: GitCommandError,
 });
 
-export const WsGitCheckoutRpc = Rpc.make(WS_METHODS.gitCheckout, {
-  payload: GitCheckoutInput,
-  success: GitCheckoutResult,
+export const WsVcsSwitchRefRpc = Rpc.make(WS_METHODS.vcsSwitchRef, {
+  payload: VcsSwitchRefInput,
+  success: VcsSwitchRefResult,
   error: GitCommandError,
 });
 
-export const WsGitInitRpc = Rpc.make(WS_METHODS.gitInit, {
-  payload: GitInitInput,
-  error: GitCommandError,
-});
-
-export const WsGitGetReviewDiffsRpc = Rpc.make(WS_METHODS.gitGetReviewDiffs, {
-  payload: GitReviewDiffsInput,
-  success: GitReviewDiffsResult,
-  error: GitCommandError,
+export const WsVcsInitRpc = Rpc.make(WS_METHODS.vcsInit, {
+  payload: VcsInitInput,
+  error: VcsError,
 });
 
 export const WsTerminalOpenRpc = Rpc.make(WS_METHODS.terminalOpen, {
   payload: TerminalOpenInput,
   success: TerminalSessionSnapshot,
   error: TerminalError,
-});
-
-export const WsTerminalAttachRpc = Rpc.make(WS_METHODS.terminalAttach, {
-  payload: TerminalAttachInput,
-  success: TerminalAttachStreamEvent,
-  error: TerminalError,
-  stream: true,
 });
 
 export const WsTerminalWriteRpc = Rpc.make(WS_METHODS.terminalWrite, {
@@ -361,18 +338,6 @@ export const WsTerminalRestartRpc = Rpc.make(WS_METHODS.terminalRestart, {
 export const WsTerminalCloseRpc = Rpc.make(WS_METHODS.terminalClose, {
   payload: TerminalCloseInput,
   error: TerminalError,
-});
-
-export const WsLocalProcessStopPortsRpc = Rpc.make(WS_METHODS.localProcessStopPorts, {
-  payload: LocalProcessStopPortsInput,
-  success: LocalProcessStopPortsResult,
-  error: LocalProcessStopPortsError,
-});
-
-export const WsLocalProcessProbePortsRpc = Rpc.make(WS_METHODS.localProcessProbePorts, {
-  payload: LocalProcessProbePortsInput,
-  success: LocalProcessProbePortsResult,
-  error: LocalProcessProbePortsError,
 });
 
 export const WsOrchestrationDispatchCommandRpc = Rpc.make(
@@ -428,12 +393,6 @@ export const WsSubscribeTerminalEventsRpc = Rpc.make(WS_METHODS.subscribeTermina
   stream: true,
 });
 
-export const WsSubscribeTerminalMetadataRpc = Rpc.make(WS_METHODS.subscribeTerminalMetadata, {
-  payload: Schema.Struct({}),
-  success: TerminalMetadataStreamEvent,
-  stream: true,
-});
-
 export const WsSubscribeServerConfigRpc = Rpc.make(WS_METHODS.subscribeServerConfig, {
   payload: Schema.Struct({}),
   success: ServerConfigStreamEvent,
@@ -447,38 +406,9 @@ export const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServer
   stream: true,
 });
 
-export const WsSubscribeResourceStatsRpc = Rpc.make(WS_METHODS.subscribeResourceStats, {
-  payload: Schema.Struct({}),
-  success: ServerResourceStatsEvent,
-  stream: true,
-});
-
 export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess, {
   payload: Schema.Struct({}),
   success: AuthAccessStreamEvent,
-  stream: true,
-});
-
-export const WsPortsDetectRpc = Rpc.make(WS_METHODS.portsDetect, {
-  payload: PortsDetectInput,
-  success: PortsDetectResult,
-  error: PortsError,
-});
-
-export const WsPortsForwardCreateRpc = Rpc.make(WS_METHODS.portsForwardCreate, {
-  payload: PortsForwardCreateInput,
-  success: PortForward,
-  error: PortsError,
-});
-
-export const WsPortsForwardRemoveRpc = Rpc.make(WS_METHODS.portsForwardRemove, {
-  payload: PortsForwardRemoveInput,
-  error: PortsError,
-});
-
-export const WsSubscribePortForwardsRpc = Rpc.make(WS_METHODS.subscribePortForwards, {
-  payload: Schema.Struct({}),
-  success: PortForwardMetadataStreamEvent,
   stream: true,
 });
 
@@ -488,49 +418,40 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerUpsertKeybindingRpc,
   WsServerGetSettingsRpc,
   WsServerUpdateSettingsRpc,
+  WsServerDiscoverSourceControlRpc,
+  WsSourceControlLookupRepositoryRpc,
+  WsSourceControlCloneRepositoryRpc,
+  WsSourceControlPublishRepositoryRpc,
   WsProjectsSearchEntriesRpc,
-  WsProjectsSearchLocalEntriesRpc,
-  WsProjectsListDirectoriesRpc,
   WsProjectsWriteFileRpc,
-  WsProjectsReadFileRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
-  WsSubscribeGitStatusRpc,
-  WsGitPullRpc,
-  WsGitRefreshStatusRpc,
+  WsSubscribeVcsStatusRpc,
+  WsVcsPullRpc,
+  WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
   WsGitResolvePullRequestRpc,
   WsGitPreparePullRequestThreadRpc,
-  WsGitListBranchesRpc,
-  WsGitCreateWorktreeRpc,
-  WsGitRemoveWorktreeRpc,
-  WsGitCreateBranchRpc,
-  WsGitCheckoutRpc,
-  WsGitInitRpc,
-  WsGitGetReviewDiffsRpc,
+  WsVcsListRefsRpc,
+  WsVcsCreateWorktreeRpc,
+  WsVcsRemoveWorktreeRpc,
+  WsVcsCreateRefRpc,
+  WsVcsSwitchRefRpc,
+  WsVcsInitRpc,
   WsTerminalOpenRpc,
-  WsTerminalAttachRpc,
   WsTerminalWriteRpc,
   WsTerminalResizeRpc,
   WsTerminalClearRpc,
   WsTerminalRestartRpc,
   WsTerminalCloseRpc,
-  WsLocalProcessStopPortsRpc,
-  WsLocalProcessProbePortsRpc,
   WsSubscribeTerminalEventsRpc,
-  WsSubscribeTerminalMetadataRpc,
   WsSubscribeServerConfigRpc,
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
-  WsSubscribeResourceStatsRpc,
   WsOrchestrationDispatchCommandRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,
-  WsPortsDetectRpc,
-  WsPortsForwardCreateRpc,
-  WsPortsForwardRemoveRpc,
-  WsSubscribePortForwardsRpc,
 );

@@ -21,7 +21,10 @@
   },
   "dependencies": {
     "@t3tools/contracts": "workspace:*",
+<<<<<<< HEAD
     "@t3tools/shared": "workspace:*",
+=======
+>>>>>>> upstream/main
     "effect": "catalog:"
   },
   "devDependencies": {
